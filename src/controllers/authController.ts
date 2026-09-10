@@ -1,23 +1,62 @@
 import type { Request, Response } from "express";
+
 import {
   getAuthenticatedUser,
   loginUser,
   registerClient,
 } from "../services/authService.js";
+
 import { AppError } from "../utils/appError.js";
 
 const COOKIE_NAME =
-  process.env.COOKIE_NAME || "accessToken";
+  process.env.COOKIE_NAME?.trim() || "accessToken";
+
+const isProduction =
+  process.env.NODE_ENV === "production";
+
+const accessTokenMaxAge =
+  Number(
+    process.env.JWT_ACCESS_COOKIE_MAX_AGE_MS,
+  ) || 15 * 60 * 1000;
 
 const cookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite:
-    process.env.NODE_ENV === "production"
-      ? ("none" as const)
-      : ("lax" as const),
-  maxAge: 15 * 60 * 1000,
+  secure: isProduction,
+  sameSite: isProduction
+    ? ("none" as const)
+    : ("lax" as const),
+  path: "/",
+  maxAge: accessTokenMaxAge,
 };
+
+const clearCookieOptions = {
+  httpOnly: true,
+  secure: isProduction,
+  sameSite: isProduction
+    ? ("none" as const)
+    : ("lax" as const),
+  path: "/",
+};
+
+function sanitizeUser(
+  user: {
+    email: string;
+    password?: string;
+    role: "client" | "admin";
+    isEmailVerified: boolean;
+    isActive: boolean;
+    lastLoginAt?: Date;
+    createdAt: Date;
+    updatedAt: Date;
+  },
+) {
+  const {
+    password: _password,
+    ...safeUser
+  } = user;
+
+  return safeUser;
+}
 
 export async function register(
   req: Request,
@@ -39,13 +78,14 @@ export async function register(
     phone,
   });
 
-  const { password: _, ...user } = result.user.toObject();
-
   res.status(201).json({
     success: true,
-    message: "Account created successfully.",
+    message:
+      "Account created successfully.",
     data: {
-      user,
+      user: sanitizeUser(
+        result.user.toObject(),
+      ),
       client: result.client,
     },
   });
@@ -55,7 +95,10 @@ export async function login(
   req: Request,
   res: Response,
 ) {
-  const { email, password } = req.body;
+  const {
+    email,
+    password,
+  } = req.body;
 
   const result = await loginUser({
     email,
@@ -68,13 +111,13 @@ export async function login(
     cookieOptions,
   );
 
-  const { password: _, ...user } = result.user.toObject();
-
   res.json({
     success: true,
     message: "Login successful.",
     data: {
-      user,
+      user: sanitizeUser(
+        result.user.toObject(),
+      ),
     },
   });
 }
@@ -84,33 +127,35 @@ export async function me(
   res: Response,
 ) {
   if (!req.user) {
-    throw new AppError("Authentication required.", 401);
+    throw new AppError(
+      "Authentication required.",
+      401,
+    );
   }
 
-  const user = await getAuthenticatedUser(req.user.userId);
-
-  const { password: _, ...safeUser } = user.toObject();
+  const user =
+    await getAuthenticatedUser(
+      req.user.userId,
+    );
 
   res.json({
     success: true,
     data: {
-      user: safeUser,
+      user: sanitizeUser(
+        user.toObject(),
+      ),
     },
   });
 }
 
-export function logout(
+export async function logout(
   _req: Request,
   res: Response,
 ) {
-  res.clearCookie(COOKIE_NAME, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite:
-      process.env.NODE_ENV === "production"
-        ? ("none" as const)
-        : ("lax" as const),
-  });
+  res.clearCookie(
+    COOKIE_NAME,
+    clearCookieOptions,
+  );
 
   res.json({
     success: true,

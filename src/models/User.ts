@@ -1,4 +1,7 @@
-import mongoose, { Document, Schema } from "mongoose";
+import mongoose, {
+  Document,
+  Schema,
+} from "mongoose";
 
 export type UserRole = "client" | "admin";
 
@@ -34,6 +37,7 @@ const userSchema = new Schema<IUser>(
       enum: ["client", "admin"],
       default: "client",
       required: true,
+      immutable: true,
     },
 
     isEmailVerified: {
@@ -52,7 +56,12 @@ const userSchema = new Schema<IUser>(
   },
   {
     timestamps: true,
+    strict: true,
+    strictQuery: true,
   },
 );
 
-export const User = mongoose.model<IUser>("User", userSchema);
+export const User = mongoose.model<IUser>(
+  "User",
+  userSchema,
+);

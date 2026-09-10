@@ -9,7 +9,7 @@ async function startServer() {
   await connectDatabase();
 
   app.listen(port, () => {
-    console.log(`SnS API running on http://localhost:${port}`);
+    console.log(`SnS API listening on port ${port}`);
   });
 }
 

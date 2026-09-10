@@ -20,16 +20,18 @@ export function validate(
       return;
     }
 
-    if (target === "body") {
-      req.body = result.data;
-    }
+    switch (target) {
+      case "body":
+        req.body = result.data;
+        break;
 
-    if (target === "params") {
-      Object.assign(req.params, result.data);
-    }
+      case "params":
+        Object.assign(req.params, result.data);
+        break;
 
-    if (target === "query") {
-      Object.assign(req.query, result.data);
+      case "query":
+        Object.assign(req.query, result.data);
+        break;
     }
 
     next();

@@ -9,33 +9,39 @@ import {
   updateClientStatus,
 } from "../services/clientService.js";
 
+import { AppError } from "../utils/appError.js";
+
 function getAuthenticatedUserId(
   req: Request,
-) {
+): string {
   const userId = req.user?.userId;
 
   if (!userId) {
-    throw new Error(
-      "Authenticated user not found.",
+    throw new AppError(
+      "Authentication required.",
+      401,
     );
   }
 
   return userId;
 }
 
-function getClientId(req: Request) {
-  const { id } = req.params;
+function getClientId(
+  req: Request,
+): string {
+  const clientId = req.params.id;
 
   if (
-    typeof id !== "string" ||
-    !id.trim()
+    typeof clientId !== "string" ||
+    clientId.length === 0
   ) {
-    throw new Error(
+    throw new AppError(
       "Client ID is required.",
+      400,
     );
   }
 
-  return id;
+  return clientId;
 }
 
 /*
@@ -87,7 +93,8 @@ export async function getAll(
   _req: Request,
   res: Response,
 ) {
-  const clients = await getClients();
+  const clients =
+    await getClients();
 
   res.status(200).json({
     success: true,

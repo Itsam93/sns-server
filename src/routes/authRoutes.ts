@@ -8,6 +8,16 @@ import {
 } from "../controllers/authController.js";
 
 import { requireAuth } from "../middleware/authMiddleware.js";
+
+import {
+  csrfTokenMiddleware,
+  requireCsrfToken,
+} from "../middleware/csrfMiddleware.js";
+
+import {
+  authRateLimiter,
+} from "../middleware/rateLimitMiddleware.js";
+
 import { validate } from "../middleware/validateMiddleware.js";
 
 import {
@@ -19,21 +29,37 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 
+router.get(
+  "/csrf",
+  csrfTokenMiddleware,
+  (_req, res) => {
+    res.status(200).json({
+      success: true,
+    });
+  },
+);
+
 router.post(
   "/register",
+  authRateLimiter,
+  requireCsrfToken,
   validate(registerSchema),
   asyncHandler(register),
 );
 
 router.post(
   "/login",
+  authRateLimiter,
+  requireCsrfToken,
   validate(loginSchema),
   asyncHandler(login),
 );
 
 router.post(
   "/logout",
-  logout,
+  requireAuth,
+  requireCsrfToken,
+  asyncHandler(logout),
 );
 
 router.get(

@@ -11,6 +11,9 @@ import {
 
 import { requireAuth } from "../middleware/authMiddleware.js";
 import { requireRole } from "../middleware/roleMiddleware.js";
+import {
+  requireCsrfToken,
+} from "../middleware/csrfMiddleware.js";
 import { validate } from "../middleware/validateMiddleware.js";
 
 import {
@@ -39,6 +42,7 @@ router.get(
 router.patch(
   "/me",
   requireRole("client"),
+  requireCsrfToken,
   validate(updateMyProfileSchema),
   asyncHandler(updateMine),
 );
@@ -63,6 +67,7 @@ router.get(
 router.patch(
   "/:id",
   requireRole("admin"),
+  requireCsrfToken,
   validate(clientIdSchema, "params"),
   validate(adminUpdateClientSchema),
   asyncHandler(update),
@@ -71,6 +76,7 @@ router.patch(
 router.patch(
   "/:id/status",
   requireRole("admin"),
+  requireCsrfToken,
   validate(clientIdSchema, "params"),
   validate(updateClientStatusSchema),
   asyncHandler(updateStatus),

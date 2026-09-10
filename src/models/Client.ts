@@ -37,6 +37,7 @@ const clientSchema =
         ],
         unique: true,
         index: true,
+        immutable: true,
       },
 
       firstName: {
@@ -46,6 +47,7 @@ const clientSchema =
           "First name is required",
         ],
         trim: true,
+        minlength: 2,
         maxlength: 100,
       },
 
@@ -56,6 +58,7 @@ const clientSchema =
           "Last name is required",
         ],
         trim: true,
+        minlength: 2,
         maxlength: 100,
       },
 
@@ -87,6 +90,8 @@ const clientSchema =
     },
     {
       timestamps: true,
+      strict: true,
+      strictQuery: true,
     },
   );
 

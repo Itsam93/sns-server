@@ -13,15 +13,51 @@ type UpdateClientProfileInput = {
   profileImage?: string;
 };
 
+const clientUserSelect =
+  "email role isEmailVerified isActive lastLoginAt createdAt";
+
 function validateObjectId(
   id: string,
   fieldName: string,
-) {
+): void {
   if (!mongoose.isValidObjectId(id)) {
     throw new AppError(
       `Invalid ${fieldName}.`,
       400,
     );
+  }
+}
+
+function applyProfileUpdates(
+  client: InstanceType<typeof Client>,
+  data: UpdateClientProfileInput,
+): void {
+  if (data.firstName !== undefined) {
+    client.firstName = data.firstName;
+  }
+
+  if (data.lastName !== undefined) {
+    client.lastName = data.lastName;
+  }
+
+  if (data.phone !== undefined) {
+    client.phone = data.phone;
+  }
+
+  if (data.dateOfBirth !== undefined) {
+    client.dateOfBirth = data.dateOfBirth;
+  }
+
+  if (
+    data.preferredContactMethod !==
+    undefined
+  ) {
+    client.preferredContactMethod =
+      data.preferredContactMethod;
+  }
+
+  if (data.profileImage !== undefined) {
+    client.profileImage = data.profileImage;
   }
 }
 
@@ -35,8 +71,7 @@ export async function getMyProfile(
       userId,
     }).populate({
       path: "userId",
-      select:
-        "email role isEmailVerified isActive lastLoginAt createdAt",
+      select: clientUserSelect,
     });
 
   if (!client) {
@@ -67,43 +102,7 @@ export async function updateMyProfile(
     );
   }
 
-  if (data.firstName !== undefined) {
-    client.firstName =
-      data.firstName;
-  }
-
-  if (data.lastName !== undefined) {
-    client.lastName =
-      data.lastName;
-  }
-
-  if (data.phone !== undefined) {
-    client.phone = data.phone;
-  }
-
-  if (
-    data.dateOfBirth !==
-    undefined
-  ) {
-    client.dateOfBirth =
-      data.dateOfBirth;
-  }
-
-  if (
-    data.preferredContactMethod !==
-    undefined
-  ) {
-    client.preferredContactMethod =
-      data.preferredContactMethod;
-  }
-
-  if (
-    data.profileImage !==
-    undefined
-  ) {
-    client.profileImage =
-      data.profileImage;
-  }
+  applyProfileUpdates(client, data);
 
   await client.save();
 
@@ -114,13 +113,13 @@ export async function getClients() {
   return Client.find()
     .populate({
       path: "userId",
-      select:
-        "email role isEmailVerified isActive lastLoginAt createdAt",
+      select: clientUserSelect,
     })
     .sort({
       lastName: 1,
       firstName: 1,
-    });
+    })
+    .lean();
 }
 
 export async function getClientById(
@@ -134,11 +133,12 @@ export async function getClientById(
   const client =
     await Client.findById(
       clientId,
-    ).populate({
-      path: "userId",
-      select:
-        "email role isEmailVerified isActive lastLoginAt createdAt",
-    });
+    )
+      .populate({
+        path: "userId",
+        select: clientUserSelect,
+      })
+      .lean();
 
   if (!client) {
     throw new AppError(
@@ -171,49 +171,11 @@ export async function updateClient(
     );
   }
 
-  if (data.firstName !== undefined) {
-    client.firstName =
-      data.firstName;
-  }
-
-  if (data.lastName !== undefined) {
-    client.lastName =
-      data.lastName;
-  }
-
-  if (data.phone !== undefined) {
-    client.phone = data.phone;
-  }
-
-  if (
-    data.dateOfBirth !==
-    undefined
-  ) {
-    client.dateOfBirth =
-      data.dateOfBirth;
-  }
-
-  if (
-    data.preferredContactMethod !==
-    undefined
-  ) {
-    client.preferredContactMethod =
-      data.preferredContactMethod;
-  }
-
-  if (
-    data.profileImage !==
-    undefined
-  ) {
-    client.profileImage =
-      data.profileImage;
-  }
+  applyProfileUpdates(client, data);
 
   await client.save();
 
-  return getClientById(
-    clientId,
-  );
+  return getClientById(clientId);
 }
 
 export async function updateClientStatus(
@@ -228,7 +190,7 @@ export async function updateClientStatus(
   const client =
     await Client.findById(
       clientId,
-    );
+    ).select("userId");
 
   if (!client) {
     throw new AppError(
@@ -249,12 +211,9 @@ export async function updateClientStatus(
     );
   }
 
-  user.isActive =
-    isActive;
+  user.isActive = isActive;
 
   await user.save();
 
-  return getClientById(
-    clientId,
-  );
+  return getClientById(clientId);
 }

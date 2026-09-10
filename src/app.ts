@@ -10,38 +10,133 @@ import routes from "./routes/index.js";
 
 const app = express();
 
-app.use(helmet());
+const isProduction =
+  process.env.NODE_ENV === "production";
+
+const clientUrl =
+  process.env.CLIENT_URL?.trim();
+
+if (!clientUrl) {
+  throw new Error(
+    "CLIENT_URL is not configured",
+  );
+}
+
+let allowedOrigin: string;
+
+try {
+  allowedOrigin =
+    new URL(clientUrl).origin;
+} catch {
+  throw new Error(
+    "CLIENT_URL must be a valid URL",
+  );
+}
+
+if (
+  isProduction &&
+  !allowedOrigin.startsWith("https://")
+) {
+  throw new Error(
+    "CLIENT_URL must use HTTPS in production",
+  );
+}
+
+app.disable("x-powered-by");
+
+if (isProduction) {
+  app.set("trust proxy", 1);
+}
+
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+  }),
+);
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL,
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (origin === allowedOrigin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(
+        new Error(
+          "CORS origin not allowed",
+        ),
+      );
+    },
     credentials: true,
+    methods: [
+      "GET",
+      "HEAD",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-CSRF-Token",
+    ],
+    optionsSuccessStatus: 204,
+  }),
+);
+
+const globalRateLimiter =
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 150,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: {
+      success: false,
+      message:
+        "Too many requests. Please try again later.",
+    },
+  });
+
+app.use(globalRateLimiter);
+
+app.use(
+  express.json({
+    limit: "100kb",
   }),
 );
 
 app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 100,
-    standardHeaders: "draft-7",
-    legacyHeaders: false,
+  express.urlencoded({
+    extended: false,
+    limit: "100kb",
   }),
 );
 
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-app.get("/api/health", (_req, res) => {
-  res.json({
-    success: true,
-    message: "SnS API is running",
-  });
-});
+app.get(
+  "/api/health",
+  (_req, res) => {
+    res.status(200).json({
+      success: true,
+      message:
+        "SnS API is running",
+    });
+  },
+);
 
 app.use("/api", routes);
 
 app.use(notFoundMiddleware);
+
 app.use(errorMiddleware);
 
 export default app;
