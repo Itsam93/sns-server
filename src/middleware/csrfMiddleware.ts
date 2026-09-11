@@ -5,7 +5,9 @@ const CSRF_COOKIE_NAME =
   process.env.CSRF_COOKIE_NAME?.trim() ||
   "csrfToken";
 
-const CSRF_HEADER_NAME = "x-csrf-token";
+const CSRF_HEADER_NAME =
+  process.env.CSRF_HEADER_NAME?.trim() ||
+  "X-CSRF-Token";
 
 const isProduction =
   process.env.NODE_ENV === "production";
@@ -64,6 +66,21 @@ export const csrfTokenMiddleware: RequestHandler = (
   next,
 ) => {
   try {
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, proxy-revalidate",
+    );
+
+    res.setHeader(
+      "Pragma",
+      "no-cache",
+    );
+
+    res.setHeader(
+      "Expires",
+      "0",
+    );
+
     const existingToken =
       req.cookies?.[CSRF_COOKIE_NAME];
 
