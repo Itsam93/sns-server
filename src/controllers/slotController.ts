@@ -11,7 +11,7 @@ import {
 function getQueryString(
   value: unknown,
   fieldName: string,
-) {
+): string {
   if (
     typeof value !== "string" ||
     !value.trim()
@@ -27,7 +27,7 @@ function getQueryString(
 function parseDate(
   value: unknown,
   fieldName: string,
-) {
+): Date {
   const dateString =
     getQueryString(
       value,
@@ -38,7 +38,11 @@ function parseDate(
     dateString,
   );
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
     throw new Error(
       `${fieldName} must be a valid date.`,
     );
@@ -70,10 +74,7 @@ export async function getForDate(
 
   res.status(200).json({
     success: true,
-    data: {
-      date,
-      slots,
-    },
+    data: slots,
   });
 }
 
