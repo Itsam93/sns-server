@@ -9,9 +9,6 @@ const CSRF_HEADER_NAME =
   process.env.CSRF_HEADER_NAME?.trim() ||
   "X-CSRF-Token";
 
-const isProduction =
-  process.env.NODE_ENV === "production";
-
 const CSRF_TOKEN_BYTES = 32;
 const CSRF_TOKEN_LENGTH =
   CSRF_TOKEN_BYTES * 2;
@@ -50,10 +47,8 @@ function setCsrfCookie(
     token,
     {
       httpOnly: false,
-      secure: isProduction,
-      sameSite: isProduction
-        ? ("none" as const)
-        : ("lax" as const),
+      secure: true,
+      sameSite: "none",
       path: "/",
       maxAge: CSRF_COOKIE_MAX_AGE,
     },
