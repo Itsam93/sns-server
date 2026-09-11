@@ -42,6 +42,12 @@ if (
   );
 }
 
+const allowedOrigins = new Set([
+  allowedOrigin,
+  "https://sns-frontend-rouge.vercel.app",
+  "http://localhost:5173",
+]);
+
 app.disable("x-powered-by");
 
 if (isProduction) {
@@ -62,7 +68,7 @@ app.use(
         return;
       }
 
-      if (origin === allowedOrigin) {
+      if (allowedOrigins.has(origin)) {
         callback(null, true);
         return;
       }
