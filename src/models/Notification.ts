@@ -7,6 +7,7 @@ export type NotificationType =
   | "appointment"
   | "intake"
   | "workshop"
+  | "broadcast"
   | "system";
 
 export interface INotification
@@ -43,6 +44,7 @@ const notificationSchema =
           "appointment",
           "intake",
           "workshop",
+          "broadcast",
           "system",
         ],
         required: true,
