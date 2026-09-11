@@ -9,10 +9,15 @@ import {
 import { AppError } from "../utils/appError.js";
 
 const COOKIE_NAME =
-  process.env.COOKIE_NAME?.trim() || "accessToken";
+  process.env.COOKIE_NAME?.trim() ||
+  "accessToken";
 
-const isProduction =
-  process.env.NODE_ENV === "production";
+const clientUrl =
+  process.env.CLIENT_URL?.trim();
+
+const isCrossSiteDeployment =
+  Boolean(clientUrl) &&
+  clientUrl.startsWith("https://");
 
 const accessTokenMaxAge =
   Number(
@@ -21,8 +26,8 @@ const accessTokenMaxAge =
 
 const cookieOptions = {
   httpOnly: true,
-  secure: isProduction,
-  sameSite: isProduction
+  secure: isCrossSiteDeployment,
+  sameSite: isCrossSiteDeployment
     ? ("none" as const)
     : ("lax" as const),
   path: "/",
@@ -31,8 +36,8 @@ const cookieOptions = {
 
 const clearCookieOptions = {
   httpOnly: true,
-  secure: isProduction,
-  sameSite: isProduction
+  secure: isCrossSiteDeployment,
+  sameSite: isCrossSiteDeployment
     ? ("none" as const)
     : ("lax" as const),
   path: "/",
