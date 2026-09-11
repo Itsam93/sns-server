@@ -13,10 +13,9 @@ const COOKIE_NAME =
   "accessToken";
 
 const clientUrl =
-  process.env.CLIENT_URL?.trim();
+  process.env.CLIENT_URL?.trim() || "";
 
 const isCrossSiteDeployment =
-  Boolean(clientUrl) &&
   clientUrl.startsWith("https://");
 
 const accessTokenMaxAge =
