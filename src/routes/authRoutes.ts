@@ -35,6 +35,10 @@ router.get(
   (_req, res) => {
     res.status(200).json({
       success: true,
+      data: {
+        csrfToken:
+          res.locals.csrfToken,
+      },
     });
   },
 );

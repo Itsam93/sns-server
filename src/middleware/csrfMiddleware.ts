@@ -85,6 +85,9 @@ export const csrfTokenMiddleware: RequestHandler = (
       req.cookies?.[CSRF_COOKIE_NAME];
 
     if (isValidCsrfToken(existingToken)) {
+      res.locals.csrfToken =
+        existingToken;
+
       next();
       return;
     }
@@ -92,6 +95,8 @@ export const csrfTokenMiddleware: RequestHandler = (
     const token = createCsrfToken();
 
     setCsrfCookie(res, token);
+
+    res.locals.csrfToken = token;
 
     next();
   } catch {
