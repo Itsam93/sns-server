@@ -4,9 +4,12 @@ import type {
 } from "express";
 
 import {
+  changePassword,
   getAuthenticatedUser,
   loginUser,
   registerClient,
+  requestPasswordReset,
+  resetPassword,
   verifyEmail,
 } from "../services/authService.js";
 
@@ -24,8 +27,10 @@ const isCrossSiteDeployment =
 
 const accessTokenMaxAge =
   Number(
-    process.env.JWT_ACCESS_COOKIE_MAX_AGE_MS,
-  ) || 15 * 60 * 1000;
+    process.env
+      .JWT_ACCESS_COOKIE_MAX_AGE_MS,
+  ) ||
+  15 * 60 * 1000;
 
 const cookieOptions = {
   httpOnly: true,
@@ -95,7 +100,8 @@ export async function register(
       user: sanitizeUser(
         result.user.toObject(),
       ),
-      client: result.client,
+      client:
+        result.client,
     },
   });
 }
@@ -105,7 +111,8 @@ export async function verifyEmailAddress(
   res: Response,
 ) {
   const token =
-    typeof req.query.token === "string"
+    typeof req.query.token ===
+    "string"
       ? req.query.token
       : "";
 
@@ -158,6 +165,80 @@ export async function login(
         result.user.toObject(),
       ),
     },
+  });
+}
+
+export async function forgotPassword(
+  req: Request,
+  res: Response,
+) {
+  const { email } =
+    req.body;
+
+  await requestPasswordReset({
+    email,
+  });
+
+  res.json({
+    success: true,
+    message:
+      "If an account exists with that email address, a password reset link has been sent.",
+  });
+}
+
+export async function resetPasswordController(
+  req: Request,
+  res: Response,
+) {
+  const {
+    token,
+    password,
+    confirmPassword,
+  } = req.body;
+
+  await resetPassword({
+    token,
+    password,
+    confirmPassword,
+  });
+
+  res.json({
+    success: true,
+    message:
+      "Your password has been reset successfully. You can now sign in with your new password.",
+  });
+}
+
+export async function changePasswordController(
+  req: Request,
+  res: Response,
+) {
+  if (!req.user) {
+    throw new AppError(
+      "Authentication required.",
+      401,
+    );
+  }
+
+  const {
+    currentPassword,
+    newPassword,
+    confirmPassword,
+  } = req.body;
+
+  await changePassword(
+    req.user.userId,
+    {
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    },
+  );
+
+  res.json({
+    success: true,
+    message:
+      "Your password has been changed successfully.",
   });
 }
 

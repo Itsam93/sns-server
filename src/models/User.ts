@@ -17,6 +17,9 @@ export interface IUser extends Document {
   emailVerificationExpiresAt?: Date;
   emailVerifiedAt?: Date;
 
+  passwordResetTokenHash?: string;
+  passwordResetExpiresAt?: Date;
+
   isActive: boolean;
   lastLoginAt?: Date;
 
@@ -74,6 +77,16 @@ const userSchema =
 
       emailVerifiedAt: {
         type: Date,
+      },
+
+      passwordResetTokenHash: {
+        type: String,
+        select: false,
+      },
+
+      passwordResetExpiresAt: {
+        type: Date,
+        select: false,
       },
 
       isActive: {

@@ -644,3 +644,259 @@ export async function sendAccountEmail(
       data.html,
   });
 }
+
+
+export async function sendPasswordResetEmail(
+  data: {
+    email: string;
+    firstName?: string;
+    resetToken: string;
+  },
+): Promise<EmailDeliveryResult> {
+  const resetUrl =
+    `${emailConfig.clientUrl}/reset-password?token=${encodeURIComponent(
+      data.resetToken,
+    )}`;
+
+  const greeting =
+    data.firstName?.trim()
+      ? `Hello ${data.firstName},`
+      : "Hello,";
+
+  return sendEmail({
+    to: data.email,
+    subject:
+      "Reset your Stitches-N-Spice password",
+
+    text: `
+${greeting}
+
+We received a request to reset the password for your Stitches-N-Spice account.
+
+You can reset your password by visiting the link below:
+
+${resetUrl}
+
+This password reset link expires in 1 hour and can only be used once.
+
+If you did not request a password reset, you can safely ignore this email. Your password will not be changed.
+
+Stitches-N-Spice
+    `.trim(),
+
+    html: `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+  <title>Reset your Stitches-N-Spice password</title>
+</head>
+
+<body
+  style="
+    margin: 0;
+    padding: 0;
+    background: #f7f7f4;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #20251f;
+  "
+>
+  <div
+    style="
+      display: none;
+      max-height: 0;
+      overflow: hidden;
+      opacity: 0;
+    "
+  >
+    Reset your Stitches-N-Spice account password.
+  </div>
+
+  <table
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+      background: #f7f7f4;
+    "
+  >
+    <tr>
+      <td
+        align="center"
+        style="
+          padding: 40px 20px;
+        "
+      >
+        <table
+          width="100%"
+          cellpadding="0"
+          cellspacing="0"
+          border="0"
+          style="
+            max-width: 620px;
+            background: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+          "
+        >
+          <tr>
+            <td
+              style="
+                padding: 32px 36px;
+                border-bottom: 1px solid #eeeeea;
+              "
+            >
+              <div
+                style="
+                  font-size: 22px;
+                  font-weight: 700;
+                  color: #315c43;
+                "
+              >
+                Stitches-N-Spice
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td
+              style="
+                padding: 40px 36px;
+              "
+            >
+              <h1
+                style="
+                  margin: 0 0 20px;
+                  font-size: 28px;
+                  line-height: 1.2;
+                  color: #20251f;
+                "
+              >
+                Reset your password
+              </h1>
+
+              <p
+                style="
+                  margin: 0 0 16px;
+                  font-size: 16px;
+                  line-height: 1.7;
+                  color: #555a54;
+                "
+              >
+                ${greeting}
+              </p>
+
+              <p
+                style="
+                  margin: 0 0 16px;
+                  font-size: 16px;
+                  line-height: 1.7;
+                  color: #555a54;
+                "
+              >
+                We received a request to reset the
+                password for your Stitches-N-Spice
+                account.
+              </p>
+
+              <p
+                style="
+                  margin: 0 0 28px;
+                  font-size: 16px;
+                  line-height: 1.7;
+                  color: #555a54;
+                "
+              >
+                Click the button below to create a
+                new password.
+              </p>
+
+              <p
+                style="
+                  margin: 0 0 28px;
+                "
+              >
+                <a
+                  href="${resetUrl}"
+                  style="
+                    display: inline-block;
+                    padding: 14px 24px;
+                    background: #315c43;
+                    color: #ffffff;
+                    text-decoration: none;
+                    border-radius: 8px;
+                    font-size: 15px;
+                    font-weight: 600;
+                  "
+                >
+                  Reset my password
+                </a>
+              </p>
+
+              <p
+                style="
+                  margin: 0 0 16px;
+                  font-size: 14px;
+                  line-height: 1.7;
+                  color: #777b76;
+                "
+              >
+                This password reset link expires in
+                1 hour and can only be used once.
+              </p>
+
+              <p
+                style="
+                  margin: 0;
+                  font-size: 14px;
+                  line-height: 1.7;
+                  color: #777b76;
+                "
+              >
+                If you did not request a password
+                reset, you can safely ignore this email.
+                Your password will not be changed.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td
+              style="
+                padding: 24px 36px;
+                background: #fafaf8;
+                border-top: 1px solid #eeeeea;
+                color: #777b76;
+                font-size: 13px;
+                line-height: 1.6;
+              "
+            >
+              <p style="margin: 0;">
+                This email was sent by
+                Stitches-N-Spice.
+              </p>
+
+              <p
+                style="
+                  margin: 8px 0 0;
+                "
+              >
+                Please do not reply to this
+                automated message.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `.trim(),
+  });
+}

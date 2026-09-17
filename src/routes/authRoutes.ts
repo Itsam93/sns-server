@@ -1,14 +1,19 @@
 import { Router } from "express";
 
 import {
+  changePasswordController,
+  forgotPassword,
   login,
   logout,
   me,
   register,
+  resetPasswordController,
   verifyEmailAddress,
 } from "../controllers/authController.js";
 
-import { requireAuth } from "../middleware/authMiddleware.js";
+import {
+  requireAuth,
+} from "../middleware/authMiddleware.js";
 
 import {
   csrfTokenMiddleware,
@@ -17,16 +22,24 @@ import {
 
 import {
   authRateLimiter,
+  passwordResetRateLimiter,
 } from "../middleware/rateLimitMiddleware.js";
 
-import { validate } from "../middleware/validateMiddleware.js";
+import {
+  validate,
+} from "../middleware/validateMiddleware.js";
 
 import {
+  changePasswordSchema,
+  forgotPasswordSchema,
   loginSchema,
   registerSchema,
+  resetPasswordSchema,
 } from "../utils/validation.js";
 
-import { asyncHandler } from "../utils/asyncHandler.js";
+import {
+  asyncHandler,
+} from "../utils/asyncHandler.js";
 
 const router = Router();
 
@@ -54,7 +67,9 @@ router.post(
 
 router.get(
   "/verify-email",
-  asyncHandler(verifyEmailAddress),
+  asyncHandler(
+    verifyEmailAddress,
+  ),
 );
 
 router.post(
@@ -63,6 +78,43 @@ router.post(
   requireCsrfToken,
   validate(loginSchema),
   asyncHandler(login),
+);
+
+router.post(
+  "/forgot-password",
+  passwordResetRateLimiter,
+  requireCsrfToken,
+  validate(
+    forgotPasswordSchema,
+  ),
+  asyncHandler(
+    forgotPassword,
+  ),
+);
+
+router.post(
+  "/reset-password",
+  passwordResetRateLimiter,
+  requireCsrfToken,
+  validate(
+    resetPasswordSchema,
+  ),
+  asyncHandler(
+    resetPasswordController,
+  ),
+);
+
+router.post(
+  "/change-password",
+  requireAuth,
+  passwordResetRateLimiter,
+  requireCsrfToken,
+  validate(
+    changePasswordSchema,
+  ),
+  asyncHandler(
+    changePasswordController,
+  ),
 );
 
 router.post(

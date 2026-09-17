@@ -4,10 +4,14 @@ import {
   Notification,
   type NotificationType,
 } from "../models/Notification.js";
+
 import {
   sendEmail,
 } from "./emailService.js";
-import { AppError } from "../utils/appError.js";
+
+import {
+  AppError,
+} from "../utils/appError.js";
 
 type CreateNotificationInput = {
   userId: string;
@@ -24,13 +28,12 @@ type SendNotificationInput =
     emailHtml?: string;
   };
 
-const NOTIFICATION_TYPES:
-  NotificationType[] = [
-    "appointment",
-    "intake",
-    "workshop",
-    "system",
-  ];
+const NOTIFICATION_TYPES: NotificationType[] = [
+  "appointment",
+  "intake",
+  "workshop",
+  "system",
+];
 
 function validateObjectId(
   id: string,
@@ -48,9 +51,7 @@ function validateNotificationType(
   type: NotificationType,
 ) {
   if (
-    !NOTIFICATION_TYPES.includes(
-      type,
-    )
+    !NOTIFICATION_TYPES.includes(type)
   ) {
     throw new AppError(
       "Invalid notification type.",
@@ -97,19 +98,23 @@ export async function createNotification(
     );
   }
 
+  const link =
+    data.link
+      ? normalizeText(data.link)
+      : undefined;
+
   return Notification.create({
     userId:
       data.userId,
+
     type:
       data.type,
+
     title,
+
     message,
-    link:
-      data.link
-        ? normalizeText(
-            data.link,
-          )
-        : undefined,
+
+    link,
   });
 }
 
@@ -117,29 +122,44 @@ export async function createNotificationAndEmail(
   data: SendNotificationInput,
 ) {
   const notification =
-    await createNotification(
-      data,
-    );
+    await createNotification(data);
 
   if (
     data.email &&
     data.email.trim()
   ) {
+    const email =
+      data.email.trim();
+
+    const subject =
+      data.emailSubject?.trim() ||
+      data.title.trim();
+
     try {
-      await sendEmail({
-        to:
-          data.email.trim(),
-        subject:
-          data.emailSubject?.trim() ||
-          data.title.trim(),
-        text:
-          data.message.trim(),
-        html:
-          data.emailHtml,
-      });
+      const delivery =
+        await sendEmail({
+          to: email,
+          subject,
+          text:
+            data.message.trim(),
+          html:
+            data.emailHtml,
+        });
+
+      if (!delivery.accepted) {
+        console.error(
+          "[Notification] Email was not accepted by the provider.",
+          {
+            email,
+            subject,
+            messageId:
+              delivery.messageId,
+          },
+        );
+      }
     } catch (error) {
       console.error(
-        "Notification email delivery failed:",
+        "[Notification] Email delivery failed:",
         error,
       );
     }
@@ -193,18 +213,25 @@ export async function getUnreadNotificationCount(
   });
 }
 
-async function getNotificationOrFail(
+export async function getNotificationOrFail(
   notificationId: string,
+  userId: string,
 ) {
   validateObjectId(
     notificationId,
     "notification ID",
   );
 
+  validateObjectId(
+    userId,
+    "user ID",
+  );
+
   const notification =
-    await Notification.findById(
-      notificationId,
-    );
+    await Notification.findOne({
+      _id: notificationId,
+      userId,
+    });
 
   if (!notification) {
     throw new AppError(
@@ -220,32 +247,15 @@ export async function markNotificationAsRead(
   notificationId: string,
   userId: string,
 ) {
-  validateObjectId(
-    userId,
-    "user ID",
-  );
-
   const notification =
     await getNotificationOrFail(
       notificationId,
+      userId,
     );
-
-  if (
-    notification.userId.toString() !==
-    userId
-  ) {
-    throw new AppError(
-      "You are not allowed to update this notification.",
-      403,
-    );
-  }
 
   if (!notification.isRead) {
-    notification.isRead =
-      true;
-
-    notification.readAt =
-      new Date();
+    notification.isRead = true;
+    notification.readAt = new Date();
 
     await notification.save();
   }
@@ -261,23 +271,24 @@ export async function markAllNotificationsAsRead(
     "user ID",
   );
 
-  const result =
-    await Notification.updateMany(
-      {
-        userId,
-        isRead: false,
+  const now =
+    new Date();
+
+  await Notification.updateMany(
+    {
+      userId,
+      isRead: false,
+    },
+    {
+      $set: {
+        isRead: true,
+        readAt: now,
       },
-      {
-        $set: {
-          isRead: true,
-          readAt: new Date(),
-        },
-      },
-    );
+    },
+  );
 
   return {
-    updated:
-      result.modifiedCount,
+    updated: true,
   };
 }
 
@@ -285,30 +296,15 @@ export async function deleteNotification(
   notificationId: string,
   userId: string,
 ) {
-  validateObjectId(
-    userId,
-    "user ID",
-  );
-
   const notification =
     await getNotificationOrFail(
       notificationId,
+      userId,
     );
-
-  if (
-    notification.userId.toString() !==
-    userId
-  ) {
-    throw new AppError(
-      "You are not allowed to delete this notification.",
-      403,
-    );
-  }
 
   await notification.deleteOne();
 
   return {
     deleted: true,
-    notificationId,
   };
 }

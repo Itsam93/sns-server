@@ -79,3 +79,78 @@ export const loginSchema = z
       ),
   })
   .strict();
+
+export const forgotPasswordSchema =
+  z
+    .object({
+      email: emailSchema,
+    })
+    .strict();
+
+export const resetPasswordSchema =
+  z
+    .object({
+      token: z
+        .string()
+        .trim()
+        .min(
+          1,
+          "Password reset token is required.",
+        )
+        .max(
+          256,
+          "Password reset token is invalid.",
+        ),
+
+      password: passwordSchema,
+
+      confirmPassword:
+        passwordSchema,
+    })
+    .strict()
+    .refine(
+      (data) =>
+        data.password ===
+        data.confirmPassword,
+      {
+        message:
+          "Passwords do not match.",
+        path: [
+          "confirmPassword",
+        ],
+      },
+    );
+
+export const changePasswordSchema =
+  z
+    .object({
+      currentPassword: z
+        .string()
+        .min(
+          1,
+          "Current password is required.",
+        )
+        .max(
+          128,
+          "Current password must not exceed 128 characters.",
+        ),
+
+      newPassword:
+        passwordSchema,
+
+      confirmPassword:
+        passwordSchema,
+    })
+    .strict()
+    .refine(
+      (data) =>
+        data.newPassword ===
+        data.confirmPassword,
+      {
+        message:
+          "Passwords do not match.",
+        path: [
+          "confirmPassword",
+        ],
+      },
+    );

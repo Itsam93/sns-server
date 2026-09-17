@@ -956,6 +956,7 @@ export async function cancelAppointment(
       notifyAppointmentCancelled(
         appointment._id.toString(),
         reason,
+        "client",
       ),
   );
 
@@ -1027,6 +1028,7 @@ export async function cancelClientAppointment(
       notifyAppointmentCancelled(
         appointment._id.toString(),
         reason,
+        "admin",
       ),
   );
 
