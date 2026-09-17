@@ -8,12 +8,17 @@ type UserRole = "client" | "admin";
 export type AccessTokenPayload = {
   userId: string;
   role: UserRole;
+  passwordVersion: number;
 };
 
 const JWT_ALGORITHM = "HS256" as const;
+
 const DEFAULT_JWT_ISSUER = "sns-api";
+
 const DEFAULT_JWT_AUDIENCE = "sns-client";
-const DEFAULT_ACCESS_TOKEN_EXPIRES_IN = "15m";
+
+const DEFAULT_ACCESS_TOKEN_EXPIRES_IN =
+  "15m";
 
 function getJwtSecret(): string {
   const secret =
@@ -66,7 +71,13 @@ function isAccessTokenPayload(
     payload.userId.length > 0 &&
     payload.userId.length <= 100 &&
     (payload.role === "client" ||
-      payload.role === "admin")
+      payload.role === "admin") &&
+    typeof payload.passwordVersion ===
+      "number" &&
+    Number.isInteger(
+      payload.passwordVersion,
+    ) &&
+    payload.passwordVersion >= 0
   );
 }
 
@@ -118,5 +129,7 @@ export function verifyAccessToken(
   return {
     userId: payload.userId,
     role: payload.role,
+    passwordVersion:
+      payload.passwordVersion,
   };
 }
