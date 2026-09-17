@@ -1,6 +1,9 @@
 import mongoose from "mongoose";
 
 import {
+  Client,
+} from "../models/Client.js";
+import {
   User,
   type UserRole,
 } from "../models/User.js";
@@ -254,6 +257,10 @@ export async function deleteUser(
       409,
     );
   }
+
+  await Client.deleteOne({
+    userId: user._id,
+  });
 
   await user.deleteOne();
 
