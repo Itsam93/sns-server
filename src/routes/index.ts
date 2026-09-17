@@ -23,6 +23,7 @@ import mediaAssetRoutes from "./mediaAssetRoutes.js";
 import auditLogRoutes from "./auditLogRoutes.js";
 import settingsRoutes from "./settingsRoutes.js";
 import broadcastRoutes from "./broadcastRoutes.js";
+import newsletterRoutes from "./newsletterRoutes.js";
 
 const router = Router();
 
@@ -32,37 +33,46 @@ router.use("/users", userRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/appointments", appointmentRoutes);
 router.use("/availability", availabilityRoutes);
+
 router.use(
   "/availability-exceptions",
   availabilityExceptionRoutes,
 );
+
 router.use("/slots", slotRoutes);
 router.use("/intake-forms", intakeFormRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/services", serviceRoutes);
 router.use("/workshops", workshopRoutes);
+
 router.use(
   "/workshop-requests",
   workshopRequestRoutes,
 );
+
 router.use(
   "/workshop-participants",
   workshopParticipantRoutes,
 );
+
 router.use("/testimonials", testimonialRoutes);
 router.use("/resources", resourceRoutes);
 router.use("/faqs", faqRoutes);
+
 router.use(
   "/contact-messages",
   contactMessageRoutes,
 );
+
 router.use(
   "/website-content",
   websiteContentRoutes,
 );
+
 router.use("/media-assets", mediaAssetRoutes);
 router.use("/audit-logs", auditLogRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/broadcasts", broadcastRoutes);
+router.use("/newsletter", newsletterRoutes);
 
 export default router;

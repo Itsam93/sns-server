@@ -3,7 +3,9 @@ import mongoose, {
   Schema,
 } from "mongoose";
 
-export type UserRole = "client" | "admin";
+export type UserRole =
+  | "client"
+  | "admin";
 
 export interface IUser extends Document {
   email: string;
@@ -16,52 +18,62 @@ export interface IUser extends Document {
   updatedAt: Date;
 }
 
-const userSchema = new Schema<IUser>(
-  {
-    email: {
-      type: String,
-      required: [true, "Email is required"],
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
+const userSchema =
+  new Schema<IUser>(
+    {
+      email: {
+        type: String,
+        required: [
+          true,
+          "Email is required",
+        ],
+        unique: true,
+        lowercase: true,
+        trim: true,
+      },
 
-    password: {
-      type: String,
-      required: [true, "Password is required"],
-      select: false,
-    },
+      password: {
+        type: String,
+        required: [
+          true,
+          "Password is required",
+        ],
+        select: false,
+      },
 
-    role: {
-      type: String,
-      enum: ["client", "admin"],
-      default: "client",
-      required: true,
-      immutable: true,
-    },
+      role: {
+        type: String,
+        enum: [
+          "client",
+          "admin",
+        ],
+        default: "client",
+        required: true,
+      },
 
-    isEmailVerified: {
-      type: Boolean,
-      default: false,
-    },
+      isEmailVerified: {
+        type: Boolean,
+        default: false,
+      },
 
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
+      isActive: {
+        type: Boolean,
+        default: true,
+      },
 
-    lastLoginAt: {
-      type: Date,
+      lastLoginAt: {
+        type: Date,
+      },
     },
-  },
-  {
-    timestamps: true,
-    strict: true,
-    strictQuery: true,
-  },
-);
+    {
+      timestamps: true,
+      strict: true,
+      strictQuery: true,
+    },
+  );
 
-export const User = mongoose.model<IUser>(
-  "User",
-  userSchema,
-);
+export const User =
+  mongoose.model<IUser>(
+    "User",
+    userSchema,
+  );
