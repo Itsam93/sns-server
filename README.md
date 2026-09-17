@@ -180,7 +180,7 @@ JWT_EXPIRES_IN=15m
 
 COOKIE_NAME=accessToken
 
-CLIENT_URL=http://localhost:5173
+CLIENT_URL=https://www.stitchesnspices.org
 
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=change-this-password

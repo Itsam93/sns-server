@@ -44,6 +44,7 @@ if (
 
 const allowedOrigins = new Set([
   allowedOrigin,
+  "https://www.stitchesnspices.org",
   "https://sns-frontend-rouge.vercel.app",
   "http://localhost:5173",
 ]);
