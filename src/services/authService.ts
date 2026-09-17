@@ -103,9 +103,7 @@ function hashPasswordResetToken(
 
 function generatePasswordResetToken() {
   const token =
-    crypto
-      .randomBytes(32)
-      .toString("hex");
+    crypto.randomBytes(32).toString("hex");
 
   const tokenHash =
     hashPasswordResetToken(token);
@@ -182,6 +180,7 @@ export async function registerClient(
                   email,
                   password:
                     hashedPassword,
+                  passwordVersion: 0,
                   role: "client",
                   isEmailVerified: false,
                   emailVerificationTokenHash:
@@ -396,6 +395,8 @@ export async function loginUser(
       userId:
         user._id.toString(),
       role: user.role,
+      passwordVersion:
+        user.passwordVersion,
     });
 
   return {
@@ -530,6 +531,8 @@ export async function resetPassword(
   user.password =
     hashedPassword;
 
+  user.passwordVersion += 1;
+
   user.passwordResetTokenHash =
     undefined;
 
@@ -613,6 +616,8 @@ export async function changePassword(
     await hashPassword(
       input.newPassword,
     );
+
+  user.passwordVersion += 1;
 
   user.passwordResetTokenHash =
     undefined;

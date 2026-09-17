@@ -10,6 +10,7 @@ export type UserRole =
 export interface IUser extends Document {
   email: string;
   password: string;
+  passwordVersion: number;
   role: UserRole;
 
   isEmailVerified: boolean;
@@ -48,6 +49,12 @@ const userSchema =
           "Password is required",
         ],
         select: false,
+      },
+
+      passwordVersion: {
+        type: Number,
+        default: 0,
+        min: 0,
       },
 
       role: {
