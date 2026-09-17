@@ -5,6 +5,7 @@ import {
   logout,
   me,
   register,
+  verifyEmailAddress,
 } from "../controllers/authController.js";
 
 import { requireAuth } from "../middleware/authMiddleware.js";
@@ -49,6 +50,11 @@ router.post(
   requireCsrfToken,
   validate(registerSchema),
   asyncHandler(register),
+);
+
+router.get(
+  "/verify-email",
+  asyncHandler(verifyEmailAddress),
 );
 
 router.post(

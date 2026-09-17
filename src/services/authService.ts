@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import mongoose from "mongoose";
 
 import { Client } from "../models/Client.js";
@@ -10,6 +11,15 @@ import {
 } from "../utils/password.js";
 
 import { signAccessToken } from "../utils/jwt.js";
+
+import {
+  sendVerificationEmail,
+  sendWelcomeEmail,
+} from "./emailService.js";
+
+import {
+  generateEmailToken,
+} from "../utils/emailToken.js";
 
 type RegisterInput = {
   email: string;
@@ -94,6 +104,18 @@ export async function registerClient(
       input.password,
     );
 
+  const {
+    token: verificationToken,
+    tokenHash:
+      verificationTokenHash,
+  } = generateEmailToken();
+
+  const verificationExpiresAt =
+    new Date(
+      Date.now() +
+        24 * 60 * 60 * 1000,
+    );
+
   const session =
     await mongoose.startSession();
 
@@ -117,6 +139,11 @@ export async function registerClient(
                   password:
                     hashedPassword,
                   role: "client",
+                  isEmailVerified: false,
+                  emailVerificationTokenHash:
+                    verificationTokenHash,
+                  emailVerificationExpiresAt:
+                    verificationExpiresAt,
                 },
               ],
               { session },
@@ -183,6 +210,12 @@ export async function registerClient(
       );
     }
 
+    await sendVerificationEmail({
+      email,
+      firstName,
+      verificationToken,
+    });
+
     return {
       user: createdUser,
       client: createdClient,
@@ -190,6 +223,80 @@ export async function registerClient(
   } finally {
     await session.endSession();
   }
+}
+
+export async function verifyEmail(
+  token: string,
+) {
+  const normalizedToken =
+    token.trim();
+
+  if (!normalizedToken) {
+    throw new AppError(
+      "Invalid verification link.",
+      400,
+    );
+  }
+
+  const tokenHash =
+    crypto
+      .createHash("sha256")
+      .update(normalizedToken)
+      .digest("hex");
+
+  const user =
+    await User.findOne({
+      emailVerificationTokenHash:
+        tokenHash,
+      emailVerificationExpiresAt: {
+        $gt: new Date(),
+      },
+    }).select(
+      "+emailVerificationTokenHash +emailVerificationExpiresAt",
+    );
+
+  if (!user) {
+    throw new AppError(
+      "This verification link is invalid or has expired.",
+      400,
+    );
+  }
+
+  if (user.isEmailVerified) {
+    return {
+      alreadyVerified: true,
+    };
+  }
+
+  user.isEmailVerified = true;
+
+  user.emailVerifiedAt =
+    new Date();
+
+  user.emailVerificationTokenHash =
+    undefined;
+
+  user.emailVerificationExpiresAt =
+    undefined;
+
+  await user.save();
+
+  const client =
+    await Client.findOne({
+      userId: user._id,
+    });
+
+  if (client) {
+    await sendWelcomeEmail({
+      email: user.email,
+      firstName:
+        client.firstName,
+    });
+  }
+
+  return {
+    alreadyVerified: false,
+  };
 }
 
 export async function loginUser(

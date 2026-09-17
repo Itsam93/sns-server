@@ -1,9 +1,13 @@
-import type { Request, Response } from "express";
+import type {
+  Request,
+  Response,
+} from "express";
 
 import {
   getAuthenticatedUser,
   loginUser,
   registerClient,
+  verifyEmail,
 } from "../services/authService.js";
 
 import { AppError } from "../utils/appError.js";
@@ -74,24 +78,53 @@ export async function register(
     phone,
   } = req.body;
 
-  const result = await registerClient({
-    email,
-    password,
-    firstName,
-    lastName,
-    phone,
-  });
+  const result =
+    await registerClient({
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+    });
 
   res.status(201).json({
     success: true,
     message:
-      "Account created successfully.",
+      "Account created successfully. Please check your email to verify your account.",
     data: {
       user: sanitizeUser(
         result.user.toObject(),
       ),
       client: result.client,
     },
+  });
+}
+
+export async function verifyEmailAddress(
+  req: Request,
+  res: Response,
+) {
+  const token =
+    typeof req.query.token === "string"
+      ? req.query.token
+      : "";
+
+  if (!token) {
+    throw new AppError(
+      "Verification token is required.",
+      400,
+    );
+  }
+
+  const result =
+    await verifyEmail(token);
+
+  res.json({
+    success: true,
+    message:
+      result.alreadyVerified
+        ? "Email address is already verified."
+        : "Email address verified successfully.",
   });
 }
 
@@ -104,10 +137,11 @@ export async function login(
     password,
   } = req.body;
 
-  const result = await loginUser({
-    email,
-    password,
-  });
+  const result =
+    await loginUser({
+      email,
+      password,
+    });
 
   res.cookie(
     COOKIE_NAME,
@@ -117,7 +151,8 @@ export async function login(
 
   res.json({
     success: true,
-    message: "Login successful.",
+    message:
+      "Login successful.",
     data: {
       user: sanitizeUser(
         result.user.toObject(),
@@ -163,6 +198,7 @@ export async function logout(
 
   res.json({
     success: true,
-    message: "Logout successful.",
+    message:
+      "Logout successful.",
   });
 }

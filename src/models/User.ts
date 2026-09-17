@@ -11,9 +11,15 @@ export interface IUser extends Document {
   email: string;
   password: string;
   role: UserRole;
+
   isEmailVerified: boolean;
+  emailVerificationTokenHash?: string;
+  emailVerificationExpiresAt?: Date;
+  emailVerifiedAt?: Date;
+
   isActive: boolean;
   lastLoginAt?: Date;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +60,20 @@ const userSchema =
       isEmailVerified: {
         type: Boolean,
         default: false,
+      },
+
+      emailVerificationTokenHash: {
+        type: String,
+        select: false,
+      },
+
+      emailVerificationExpiresAt: {
+        type: Date,
+        select: false,
+      },
+
+      emailVerifiedAt: {
+        type: Date,
       },
 
       isActive: {
