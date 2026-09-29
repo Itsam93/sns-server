@@ -12,6 +12,6 @@
     "forceConsistentCasingInFileNames": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src", "../node_modules/utils"],
+  "include": ["src", "../node_modules/utils", "../servicePackageValidation.ts", "../migrations"],
   "exclude": ["node_modules", "dist"]
 }

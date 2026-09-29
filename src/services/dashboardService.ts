@@ -4,7 +4,6 @@ import { Appointment } from "../models/Appointment.js";
 import { AuditLog } from "../models/AuditLog.js";
 import { Client } from "../models/Client.js";
 import { ContactMessage } from "../models/ContactMessage.js";
-import { FAQ } from "../models/FAQ.js";
 import { IntakeForm } from "../models/IntakeForm.js";
 import { Notification } from "../models/Notification.js";
 import { Resource } from "../models/Resource.js";
@@ -225,6 +224,12 @@ async function getAdminOverview(
   start: Date,
   end: Date,
 ) {
+  const activeAdminIds =
+    await User.find({
+      role: "admin",
+      isActive: true,
+    }).distinct("_id");
+
   const [
     totalUsers,
     activeUsers,
@@ -252,7 +257,9 @@ async function getAdminOverview(
       isActive: false,
     }),
 
-    Client.countDocuments(),
+    User.countDocuments({
+      role: "client",
+    }),
 
     User.countDocuments({
       role: "client",
@@ -292,15 +299,13 @@ async function getAdminOverview(
     }),
 
     ContactMessage.countDocuments({
-      status: {
-        $in: [
-          "new",
-          "read",
-        ],
-      },
+      status: "new",
     }),
 
     Notification.countDocuments({
+      userId: {
+        $in: activeAdminIds,
+      },
       isRead: false,
     }),
 

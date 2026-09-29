@@ -5,6 +5,8 @@ import {
   type ContactMessageCategory,
   type ContactMessageStatus,
 } from "../models/ContactMessage.js";
+import { User } from "../models/User.js";
+import { createNotification } from "./notificationService.js";
 import { AppError } from "../utils/appError.js";
 
 type CreateContactMessageInput = {
@@ -45,18 +47,15 @@ const STATUS_TRANSITIONS: Record<
     "responded",
     "archived",
   ],
-
   read: [
     "responded",
     "archived",
     "new",
   ],
-
   responded: [
     "archived",
     "read",
   ],
-
   archived: [
     "read",
     "responded",
@@ -129,34 +128,126 @@ function validateCategory(
   }
 }
 
+function normalizeText(value: string) {
+  return value.trim();
+}
+
+async function notifyAdminsOfNewContactMessage(
+  contactMessage: {
+    _id: mongoose.Types.ObjectId;
+    fullName: string;
+    subject: string;
+    category: ContactMessageCategory;
+  },
+) {
+  const admins = await User.find({
+    role: "admin",
+    isActive: true,
+  }).select("_id");
+
+  if (!admins.length) {
+    return;
+  }
+
+  const categoryLabel =
+    contactMessage.category.charAt(0).toUpperCase() +
+    contactMessage.category.slice(1);
+
+  const title = "New contact message";
+
+  const message =
+    `${contactMessage.fullName} sent a new ${categoryLabel.toLowerCase()} enquiry: "${contactMessage.subject}".`;
+
+  const link =
+    `/admin/contact-messages/${contactMessage._id.toString()}`;
+
+  await Promise.all(
+    admins.map((admin) =>
+      createNotification({
+        userId: admin._id.toString(),
+        type: "system",
+        title,
+        message,
+        link,
+      }),
+    ),
+  );
+}
+
 export async function createContactMessage(
   data: CreateContactMessageInput,
 ) {
+  const fullName = normalizeText(
+    data.fullName,
+  );
+  const email = normalizeText(
+    data.email,
+  ).toLowerCase();
+  const phone = data.phone
+    ? normalizeText(data.phone)
+    : undefined;
+  const subject = normalizeText(
+    data.subject,
+  );
+  const message = normalizeText(
+    data.message,
+  );
   const category =
     data.category ?? "general";
 
+  if (!fullName) {
+    throw new AppError(
+      "Full name is required.",
+      400,
+    );
+  }
+
+  if (!email) {
+    throw new AppError(
+      "Email is required.",
+      400,
+    );
+  }
+
+  if (!subject) {
+    throw new AppError(
+      "Subject is required.",
+      400,
+    );
+  }
+
+  if (!message) {
+    throw new AppError(
+      "Message is required.",
+      400,
+    );
+  }
+
   validateCategory(category);
 
-  return ContactMessage.create({
-    fullName:
-      data.fullName,
+  const contactMessage =
+    await ContactMessage.create({
+      fullName,
+      email,
+      phone,
+      subject,
+      message,
+      category,
+      status: "new",
+    });
 
-    email:
-      data.email,
+  try {
+    await notifyAdminsOfNewContactMessage(
+      contactMessage,
+    );
+  } catch (error) {
+    console.error(
+      "[ContactMessage] Failed to create admin notification:",
+      error,
+    );
+  }
 
-    phone:
-      data.phone,
-
-    subject:
-      data.subject,
-
-    message:
-      data.message,
-
-    category,
-
-    status: "new",
-  });
+  return contactMessage;
 }
 
 export async function getAllContactMessages() {
@@ -213,11 +304,10 @@ export async function updateContactMessage(
     );
 
   if (
-    data.adminNote !==
-    undefined
+    data.adminNote !== undefined
   ) {
     contactMessage.adminNote =
-      data.adminNote;
+      normalizeText(data.adminNote);
   }
 
   await contactMessage.save();
@@ -228,7 +318,6 @@ export async function updateContactMessage(
 export async function updateContactMessageStatus(
   contactMessageId: string,
   status: ContactMessageStatus,
-  adminNote?: string,
 ) {
   validateStatus(status);
 
@@ -237,51 +326,26 @@ export async function updateContactMessageStatus(
       contactMessageId,
     );
 
-  const currentStatus =
-    contactMessage.status;
-
   if (
-    currentStatus !==
-    status
+    contactMessage.status !== status &&
+    !STATUS_TRANSITIONS[
+      contactMessage.status
+    ].includes(status)
   ) {
-    const allowedTransitions =
-      STATUS_TRANSITIONS[
-        currentStatus
-      ];
-
-    if (
-      !allowedTransitions.includes(
-        status,
-      )
-    ) {
-      throw new AppError(
-        `A contact message cannot move from "${currentStatus}" to "${status}".`,
-        400,
-      );
-    }
+    throw new AppError(
+      `Cannot change contact message status from "${contactMessage.status}" to "${status}".`,
+      400,
+    );
   }
 
-  contactMessage.status =
-    status;
+  contactMessage.status = status;
 
-  if (
-    adminNote !==
-    undefined
-  ) {
-    contactMessage.adminNote =
-      adminNote;
-  }
-
-  if (
-    status === "responded"
-  ) {
+  if (status === "responded") {
     contactMessage.respondedAt =
-      contactMessage.respondedAt ??
       new Date();
-  }
-
-  if (
-    status !== "responded"
+  } else if (
+    contactMessage.status !==
+    "responded"
   ) {
     contactMessage.respondedAt =
       undefined;
@@ -304,6 +368,5 @@ export async function deleteContactMessage(
 
   return {
     deleted: true,
-    contactMessageId,
   };
 }

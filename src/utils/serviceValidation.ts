@@ -43,6 +43,12 @@ const serviceDescriptionSchema =
       "Service description must not exceed 5,000 characters.",
     );
 
+const serviceTypeSchema =
+  z.enum([
+    "single_session",
+    "session_package",
+  ]);
+
 const serviceDurationSchema =
   z
     .number()
@@ -52,81 +58,191 @@ const serviceDurationSchema =
       "Service duration must be at least 15 minutes.",
     );
 
+const serviceSessionCountSchema =
+  z
+    .number()
+    .int()
+    .min(
+      1,
+      "Session count must be at least 1.",
+    );
+
 const servicePriceSchema =
   z
     .number()
-    .min(
-      0,
-      "Service price cannot be negative.",
+    .finite(
+      "Service price must be a valid number.",
     )
-    .optional();
-
-const serviceCurrencySchema =
-  z
-    .string()
-    .trim()
-    .toUpperCase()
-    .length(
-      3,
-      "Currency must be a 3-letter currency code.",
-    )
-    .regex(
-      /^[A-Z]{3}$/,
-      "Currency must contain exactly 3 letters.",
+    .positive(
+      "Service price must be greater than zero.",
     );
+
+const servicePricingSchema =
+  z.object({
+    NGN:
+      servicePriceSchema,
+
+    USD:
+      servicePriceSchema,
+
+    GBP:
+      servicePriceSchema,
+  });
 
 const serviceStatusSchema =
   z.boolean();
 
 export const createServiceSchema =
-  z.object({
-    name:
-      serviceNameSchema,
+  z
+    .object({
+      name:
+        serviceNameSchema,
 
-    slug:
-      serviceSlugSchema,
+      slug:
+        serviceSlugSchema,
 
-    description:
-      serviceDescriptionSchema,
+      description:
+        serviceDescriptionSchema,
 
-    durationMinutes:
-      serviceDurationSchema,
+      type:
+        serviceTypeSchema,
 
-    price:
-      servicePriceSchema,
+      durationMinutes:
+        serviceDurationSchema,
 
-    currency:
-      serviceCurrencySchema
-        .default("NGN"),
+      sessionCount:
+        serviceSessionCountSchema
+          .optional(),
 
-    isActive:
-      serviceStatusSchema
-        .optional(),
-  });
+      pricing:
+        servicePricingSchema,
+
+      isActive:
+        serviceStatusSchema
+          .optional(),
+    })
+    .superRefine(
+      (
+        data,
+        context,
+      ) => {
+        if (
+          data.type ===
+            "session_package" &&
+          data.sessionCount ===
+            undefined
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode
+                .custom,
+            path: [
+              "sessionCount",
+            ],
+            message:
+              "Session count is required for a session package.",
+          });
+        }
+
+        if (
+          data.type ===
+            "single_session" &&
+          data.sessionCount !==
+            undefined &&
+          data.sessionCount !== 1
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode
+                .custom,
+            path: [
+              "sessionCount",
+            ],
+            message:
+              "A single-session service must have a session count of 1.",
+          });
+        }
+      },
+    );
 
 export const updateServiceSchema =
-  z.object({
-    name:
-      serviceNameSchema.optional(),
+  z
+    .object({
+      name:
+        serviceNameSchema
+          .optional(),
 
-    slug:
-      serviceSlugSchema.optional(),
+      slug:
+        serviceSlugSchema
+          .optional(),
 
-    description:
-      serviceDescriptionSchema
-        .optional(),
+      description:
+        serviceDescriptionSchema
+          .optional(),
 
-    durationMinutes:
-      serviceDurationSchema
-        .optional(),
+      type:
+        serviceTypeSchema
+          .optional(),
 
-    price:
-      servicePriceSchema,
+      durationMinutes:
+        serviceDurationSchema
+          .optional(),
 
-    currency:
-      serviceCurrencySchema
-        .optional(),
-  });
+      sessionCount:
+        serviceSessionCountSchema
+          .optional(),
+
+      pricing:
+        servicePricingSchema
+          .optional(),
+
+      isActive:
+        serviceStatusSchema
+          .optional(),
+    })
+    .superRefine(
+      (
+        data,
+        context,
+      ) => {
+        if (
+          data.type ===
+            "session_package" &&
+          data.sessionCount ===
+            undefined
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode
+                .custom,
+            path: [
+              "sessionCount",
+            ],
+            message:
+              "Session count is required when changing a service to a session package.",
+          });
+        }
+
+        if (
+          data.type ===
+            "single_session" &&
+          data.sessionCount !==
+            undefined &&
+          data.sessionCount !== 1
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode
+                .custom,
+            path: [
+              "sessionCount",
+            ],
+            message:
+              "A single-session service must have a session count of 1.",
+          });
+        }
+      },
+    );
 
 export const updateServiceStatusSchema =
   z.object({
@@ -136,13 +252,14 @@ export const updateServiceStatusSchema =
 
 export const serviceIdSchema =
   z.object({
-    id: z
-      .string()
-      .trim()
-      .min(
-        1,
-        "Service ID is required.",
-      ),
+    id:
+      z
+        .string()
+        .trim()
+        .min(
+          1,
+          "Service ID is required.",
+        ),
   });
 
 export const serviceSlugParamSchema =

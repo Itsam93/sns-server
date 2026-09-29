@@ -3,7 +3,11 @@ import jwt, {
   type SignOptions,
 } from "jsonwebtoken";
 
-type UserRole = "client" | "admin";
+import type {
+  UserRole,
+} from "../models/User.js";
+
+import { AppError } from "./appError.js";
 
 export type AccessTokenPayload = {
   userId: string;
@@ -11,11 +15,14 @@ export type AccessTokenPayload = {
   passwordVersion: number;
 };
 
-const JWT_ALGORITHM = "HS256" as const;
+const JWT_ALGORITHM =
+  "HS256" as const;
 
-const DEFAULT_JWT_ISSUER = "sns-api";
+const DEFAULT_JWT_ISSUER =
+  "sns-api";
 
-const DEFAULT_JWT_AUDIENCE = "sns-client";
+const DEFAULT_JWT_AUDIENCE =
+  "sns-client";
 
 const DEFAULT_ACCESS_TOKEN_EXPIRES_IN =
   "15m";
@@ -62,14 +69,19 @@ function getAccessTokenExpiresIn():
 }
 
 function isAccessTokenPayload(
-  payload: string | JwtPayload,
-): payload is JwtPayload &
+  payload:
+    | string
+    | JwtPayload,
+): payload is
+  JwtPayload &
   AccessTokenPayload {
   return (
     typeof payload !== "string" &&
-    typeof payload.userId === "string" &&
+    typeof payload.userId ===
+      "string" &&
     payload.userId.length > 0 &&
     payload.userId.length <= 100 &&
+    payload.role !== undefined &&
     (payload.role === "client" ||
       payload.role === "admin") &&
     typeof payload.passwordVersion ===
@@ -88,11 +100,17 @@ export function signAccessToken(
     payload,
     getJwtSecret(),
     {
-      algorithm: JWT_ALGORITHM,
+      algorithm:
+        JWT_ALGORITHM,
+
       expiresIn:
         getAccessTokenExpiresIn(),
-      issuer: getJwtIssuer(),
-      audience: getJwtAudience(),
+
+      issuer:
+        getJwtIssuer(),
+
+      audience:
+        getJwtAudience(),
     },
   );
 }
@@ -105,30 +123,72 @@ export function verifyAccessToken(
     token.length === 0 ||
     token.length > 4096
   ) {
-    throw new Error(
-      "Invalid access token",
+    throw new AppError(
+      "Authentication required.",
+      401,
+      "AUTHENTICATION_REQUIRED",
     );
   }
 
-  const payload = jwt.verify(
-    token,
-    getJwtSecret(),
-    {
-      algorithms: [JWT_ALGORITHM],
-      issuer: getJwtIssuer(),
-      audience: getJwtAudience(),
-    },
-  );
+  let payload:
+    | string
+    | JwtPayload;
 
-  if (!isAccessTokenPayload(payload)) {
-    throw new Error(
-      "Invalid access token payload",
+  try {
+    payload =
+      jwt.verify(
+        token,
+        getJwtSecret(),
+        {
+          algorithms: [
+            JWT_ALGORITHM,
+          ],
+
+          issuer:
+            getJwtIssuer(),
+
+          audience:
+            getJwtAudience(),
+        },
+      );
+  } catch (error: unknown) {
+    if (
+      error instanceof
+        jwt.TokenExpiredError
+    ) {
+      throw new AppError(
+        "Your session has expired.",
+        401,
+        "SESSION_EXPIRED",
+      );
+    }
+
+    throw new AppError(
+      "Authentication required.",
+      401,
+      "AUTHENTICATION_REQUIRED",
+    );
+  }
+
+  if (
+    !isAccessTokenPayload(
+      payload,
+    )
+  ) {
+    throw new AppError(
+      "Authentication required.",
+      401,
+      "AUTHENTICATION_REQUIRED",
     );
   }
 
   return {
-    userId: payload.userId,
-    role: payload.role,
+    userId:
+      payload.userId,
+
+    role:
+      payload.role,
+
     passwordVersion:
       payload.passwordVersion,
   };

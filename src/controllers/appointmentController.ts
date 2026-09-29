@@ -1,4 +1,7 @@
-import type { Request, Response } from "express";
+import type {
+  Request,
+  Response,
+} from "express";
 
 import {
   acceptAppointment,
@@ -15,41 +18,18 @@ import {
   rescheduleAppointment,
   startAppointment,
 } from "../services/appointmentService.js";
+import {
+  acceptAppointmentSchema,
+  cancelAppointmentSchema,
+  createAppointmentSchema,
+  rejectAppointmentSchema,
+  rescheduleAppointmentSchema,
+} from "../utils/appointmentValidation.js";
 import { AppError } from "../utils/appError.js";
 
-function getAppointmentId(req: Request) {
-  const { id } = req.params;
-
-  if (
-    typeof id !== "string" ||
-    !id.trim()
-  ) {
-    throw new AppError(
-      "Appointment ID is required.",
-      400,
-    );
-  }
-
-  return id;
-}
-
-function getClientId(req: Request) {
-  const clientId = req.user?.clientId;
-
-  if (
-    !clientId ||
-    !clientId.trim()
-  ) {
-    throw new AppError(
-      "Client profile not found.",
-      404,
-    );
-  }
-
-  return clientId;
-}
-
-function getAuthenticatedUser(req: Request) {
+function getAuthenticatedUser(
+  req: Request,
+) {
   const user = req.user;
 
   if (!user) {
@@ -62,15 +42,237 @@ function getAuthenticatedUser(req: Request) {
   return user;
 }
 
+function getClientId(
+  req: Request,
+): string {
+  const clientId = req.user?.clientId;
+
+  if (
+    typeof clientId !== "string" ||
+    !clientId.trim()
+  ) {
+    throw new AppError(
+      "Client profile not found.",
+      404,
+    );
+  }
+
+  return clientId.trim();
+}
+
+function getAppointmentId(
+  req: Request,
+): string {
+  const id = req.params.id;
+
+  if (
+    typeof id !== "string" ||
+    !id.trim()
+  ) {
+    throw new AppError(
+      "Appointment ID is required.",
+      400,
+    );
+  }
+
+  return id.trim();
+}
+
+function getRequiredServicePackageId(
+  req: Request,
+): string {
+  const servicePackageId =
+    req.body?.servicePackageId;
+
+  if (
+    typeof servicePackageId !== "string" ||
+    !servicePackageId.trim()
+  ) {
+    throw new AppError(
+      "Service package ID is required.",
+      400,
+    );
+  }
+
+  const value =
+    servicePackageId.trim();
+
+  if (
+    !/^[a-f\d]{24}$/i.test(value)
+  ) {
+    throw new AppError(
+      "Invalid service package ID.",
+      400,
+    );
+  }
+
+  return value;
+}
+
+function getCreateInput(
+  req: Request,
+) {
+  const body = req.body ?? {};
+
+  const result =
+    createAppointmentSchema
+      .pick({
+        serviceId: true,
+        requestedDate: true,
+        requestedTime: true,
+        sessionType: true,
+      })
+      .safeParse({
+        serviceId:
+          body.serviceId,
+        requestedDate:
+          body.requestedDate,
+        requestedTime:
+          body.requestedTime,
+        sessionType:
+          body.sessionType,
+      });
+
+  if (!result.success) {
+    throw new AppError(
+      result.error.issues[0]?.message ??
+        "Invalid appointment details.",
+      400,
+    );
+  }
+
+  return {
+    clientId:
+      getClientId(req),
+
+    serviceId:
+      result.data.serviceId,
+
+    servicePackageId:
+      getRequiredServicePackageId(req),
+
+    requestedDate:
+      result.data.requestedDate,
+
+    requestedTime:
+      result.data.requestedTime,
+
+    sessionType:
+      result.data.sessionType,
+  };
+}
+
+function getAcceptInput(
+  req: Request,
+) {
+  const result =
+    acceptAppointmentSchema.safeParse(
+      req.body ?? {},
+    );
+
+  if (!result.success) {
+    throw new AppError(
+      result.error.issues[0]?.message ??
+        "Invalid appointment acceptance details.",
+      400,
+    );
+  }
+
+  return {
+    appointmentId:
+      getAppointmentId(req),
+
+    scheduledDate:
+      result.data.scheduledDate,
+
+    scheduledTime:
+      result.data.scheduledTime,
+
+    adminNote:
+      result.data.adminNote,
+
+    meetingLink:
+      result.data.meetingLink,
+
+    location:
+      result.data.location,
+  };
+}
+
+function getRescheduleInput(
+  req: Request,
+) {
+  const result =
+    rescheduleAppointmentSchema.safeParse(
+      req.body ?? {},
+    );
+
+  if (!result.success) {
+    throw new AppError(
+      result.error.issues[0]?.message ??
+        "Invalid rescheduling details.",
+      400,
+    );
+  }
+
+  return {
+    appointmentId:
+      getAppointmentId(req),
+
+    requestedDate:
+      result.data.requestedDate,
+
+    requestedTime:
+      result.data.requestedTime,
+  };
+}
+
+function getRejectReason(
+  req: Request,
+): string {
+  const result =
+    rejectAppointmentSchema.safeParse(
+      req.body ?? {},
+    );
+
+  if (!result.success) {
+    throw new AppError(
+      result.error.issues[0]?.message ??
+        "Rejection reason is required.",
+      400,
+    );
+  }
+
+  return result.data.reason;
+}
+
+function getCancelReason(
+  req: Request,
+): string | undefined {
+  const result =
+    cancelAppointmentSchema.safeParse(
+      req.body ?? {},
+    );
+
+  if (!result.success) {
+    throw new AppError(
+      result.error.issues[0]?.message ??
+        "Invalid cancellation details.",
+      400,
+    );
+  }
+
+  return result.data.reason;
+}
+
 export async function create(
   req: Request,
   res: Response,
 ) {
   const appointment =
-    await createAppointment({
-      clientId: getClientId(req),
-      ...req.body,
-    });
+    await createAppointment(
+      getCreateInput(req),
+    );
 
   res.status(201).json({
     success: true,
@@ -154,11 +356,9 @@ export async function accept(
   res: Response,
 ) {
   const appointment =
-    await acceptAppointment({
-      appointmentId:
-        getAppointmentId(req),
-      ...req.body,
-    });
+    await acceptAppointment(
+      getAcceptInput(req),
+    );
 
   res.status(200).json({
     success: true,
@@ -175,7 +375,7 @@ export async function reject(
   const appointment =
     await rejectAppointment(
       getAppointmentId(req),
-      req.body.reason,
+      getRejectReason(req),
     );
 
   res.status(200).json({
@@ -196,16 +396,19 @@ export async function cancel(
   const user =
     getAuthenticatedUser(req);
 
+  const reason =
+    getCancelReason(req);
+
   const appointment =
     user.role === "client"
       ? await cancelClientAppointment(
           appointmentId,
           getClientId(req),
-          req.body.reason,
+          reason,
         )
       : await cancelAppointment(
           appointmentId,
-          req.body.reason,
+          reason,
         );
 
   res.status(200).json({
@@ -221,11 +424,9 @@ export async function reschedule(
   res: Response,
 ) {
   const appointment =
-    await rescheduleAppointment({
-      appointmentId:
-        getAppointmentId(req),
-      ...req.body,
-    });
+    await rescheduleAppointment(
+      getRescheduleInput(req),
+    );
 
   res.status(200).json({
     success: true,

@@ -32,6 +32,7 @@ const NOTIFICATION_TYPES: NotificationType[] = [
   "appointment",
   "intake",
   "workshop",
+  "broadcast",
   "system",
 ];
 

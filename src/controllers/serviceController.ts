@@ -1,4 +1,7 @@
-import type { Request, Response } from "express";
+import type {
+  Request,
+  Response,
+} from "express";
 
 import {
   activateService,
@@ -13,31 +16,47 @@ import {
   updateServiceStatus,
 } from "../services/serviceService.js";
 
-function getServiceId(
-  req: Request,
-) {
+import { AppError } from "../utils/appError.js";
+
+function getServiceId(req: Request): string {
   const { id } = req.params;
 
   if (
     typeof id !== "string" ||
     !id.trim()
   ) {
-    throw new Error(
+    throw new AppError(
       "Service ID is required.",
+      400,
     );
   }
 
-  return id;
+  return id.trim();
+}
+
+function getServiceSlug(req: Request): string {
+  const { slug } = req.params;
+
+  if (
+    typeof slug !== "string" ||
+    !slug.trim()
+  ) {
+    throw new AppError(
+      "Service slug is required.",
+      400,
+    );
+  }
+
+  return slug.trim();
 }
 
 export async function create(
   req: Request,
   res: Response,
 ) {
-  const service =
-    await createService(
-      req.body,
-    );
+  const service = await createService(
+    req.body,
+  );
 
   res.status(201).json({
     success: true,
@@ -95,22 +114,11 @@ export async function getBySlug(
   req: Request,
   res: Response,
 ) {
-  const { slug } =
-    req.params;
-
-  if (
-    typeof slug !== "string" ||
-    !slug.trim()
-  ) {
-    throw new Error(
-      "Service slug is required.",
-    );
-  }
+  const slug =
+    getServiceSlug(req);
 
   const service =
-    await getServiceBySlug(
-      slug,
-    );
+    await getServiceBySlug(slug);
 
   res.status(200).json({
     success: true,
@@ -145,6 +153,16 @@ export async function updateStatus(
 ) {
   const serviceId =
     getServiceId(req);
+
+  if (
+    typeof req.body?.isActive !==
+    "boolean"
+  ) {
+    throw new AppError(
+      "isActive must be a boolean.",
+      400,
+    );
+  }
 
   const service =
     await updateServiceStatus(

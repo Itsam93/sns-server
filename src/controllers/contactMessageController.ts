@@ -143,7 +143,6 @@ export async function updateStatus(
     await updateContactMessageStatus(
       req.params.id,
       req.body.status,
-      req.body.adminNote,
     );
 
   res.status(200).json({

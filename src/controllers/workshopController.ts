@@ -1,4 +1,7 @@
-import type { Request, Response } from "express";
+import type {
+  Request,
+  Response,
+} from "express";
 
 import {
   createWorkshop,
@@ -12,34 +15,67 @@ import {
   updateWorkshopStatus,
 } from "../services/workshopService.js";
 
-function getWorkshopId(req: Request) {
+import { AppError } from "../utils/appError.js";
+
+function getWorkshopId(
+  req: Request,
+): string {
   const { id } = req.params;
 
   if (
     typeof id !== "string" ||
     !id.trim()
   ) {
-    throw new Error(
+    throw new AppError(
       "Workshop ID is required.",
+      400,
     );
   }
 
-  return id;
+  return id.trim();
 }
 
-function getWorkshopSlug(req: Request) {
+function getWorkshopSlug(
+  req: Request,
+): string {
   const { slug } = req.params;
 
   if (
     typeof slug !== "string" ||
     !slug.trim()
   ) {
-    throw new Error(
+    throw new AppError(
       "Workshop slug is required.",
+      400,
     );
   }
 
-  return slug;
+  return slug.trim();
+}
+
+function getWorkshopStatus(
+  req: Request,
+):
+  | "draft"
+  | "published"
+  | "completed"
+  | "cancelled" {
+  const status =
+    req.body?.status;
+
+  if (
+    status !== "draft" &&
+    status !== "published" &&
+    status !== "completed" &&
+    status !== "cancelled"
+  ) {
+    throw new AppError(
+      "A valid workshop status is required.",
+      400,
+    );
+  }
+
+  return status;
 }
 
 export async function create(
@@ -162,10 +198,13 @@ export async function updateStatus(
   const workshopId =
     getWorkshopId(req);
 
+  const status =
+    getWorkshopStatus(req);
+
   const workshop =
     await updateWorkshopStatus(
       workshopId,
-      req.body.status,
+      status,
     );
 
   res.status(200).json({

@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
-import type { RequestHandler } from "express";
+import type {
+  RequestHandler,
+} from "express";
 
 const CSRF_COOKIE_NAME =
   process.env.CSRF_COOKIE_NAME?.trim() ||
@@ -10,6 +12,7 @@ const CSRF_HEADER_NAME =
   "X-CSRF-Token";
 
 const CSRF_TOKEN_BYTES = 32;
+
 const CSRF_TOKEN_LENGTH =
   CSRF_TOKEN_BYTES * 2;
 
@@ -24,7 +27,9 @@ const SAFE_METHODS = new Set([
 
 function createCsrfToken(): string {
   return crypto
-    .randomBytes(CSRF_TOKEN_BYTES)
+    .randomBytes(
+      CSRF_TOKEN_BYTES,
+    )
     .toString("hex");
 }
 
@@ -32,9 +37,13 @@ function isValidCsrfToken(
   token: unknown,
 ): token is string {
   return (
-    typeof token === "string" &&
-    token.length === CSRF_TOKEN_LENGTH &&
-    /^[a-f0-9]+$/i.test(token)
+    typeof token ===
+      "string" &&
+    token.length ===
+      CSRF_TOKEN_LENGTH &&
+    /^[a-f0-9]+$/i.test(
+      token,
+    )
   );
 }
 
@@ -50,106 +59,137 @@ function setCsrfCookie(
       secure: true,
       sameSite: "none",
       path: "/",
-      maxAge: CSRF_COOKIE_MAX_AGE,
+      maxAge:
+        CSRF_COOKIE_MAX_AGE,
     },
   );
 }
 
-export const csrfTokenMiddleware: RequestHandler = (
-  req,
-  res,
-  next,
-) => {
-  try {
-    res.setHeader(
-      "Cache-Control",
-      "no-store, no-cache, must-revalidate, proxy-revalidate",
-    );
+function sendCsrfError(
+  res: Parameters<RequestHandler>[1],
+): void {
+  res.status(403).json({
+    success: false,
+    code: "CSRF_TOKEN_INVALID",
+    message:
+      "Invalid CSRF token.",
+  });
+}
 
-    res.setHeader(
-      "Pragma",
-      "no-cache",
-    );
+export const csrfTokenMiddleware: RequestHandler =
+  (req, res, next) => {
+    try {
+      res.setHeader(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate, proxy-revalidate",
+      );
 
-    res.setHeader(
-      "Expires",
-      "0",
-    );
+      res.setHeader(
+        "Pragma",
+        "no-cache",
+      );
 
-    const existingToken =
-      req.cookies?.[CSRF_COOKIE_NAME];
+      res.setHeader(
+        "Expires",
+        "0",
+      );
 
-    if (isValidCsrfToken(existingToken)) {
+      const existingToken =
+        req.cookies?.[
+          CSRF_COOKIE_NAME
+        ];
+
+      if (
+        isValidCsrfToken(
+          existingToken,
+        )
+      ) {
+        res.locals.csrfToken =
+          existingToken;
+
+        next();
+
+        return;
+      }
+
+      const token =
+        createCsrfToken();
+
+      setCsrfCookie(
+        res,
+        token,
+      );
+
       res.locals.csrfToken =
-        existingToken;
+        token;
 
       next();
+    } catch {
+      res.status(500).json({
+        success: false,
+        code:
+          "CSRF_INITIALIZATION_FAILED",
+        message:
+          "Unable to initialize request security.",
+      });
+    }
+  };
+
+export const requireCsrfToken: RequestHandler =
+  (req, res, next) => {
+    if (
+      SAFE_METHODS.has(
+        req.method,
+      )
+    ) {
+      next();
+
       return;
     }
 
-    const token = createCsrfToken();
+    const cookieToken =
+      req.cookies?.[
+        CSRF_COOKIE_NAME
+      ];
 
-    setCsrfCookie(res, token);
+    const headerToken =
+      req.get(
+        CSRF_HEADER_NAME,
+      );
 
-    res.locals.csrfToken = token;
+    if (
+      !isValidCsrfToken(
+        cookieToken,
+      ) ||
+      !isValidCsrfToken(
+        headerToken,
+      )
+    ) {
+      sendCsrfError(res);
+      return;
+    }
+
+    const cookieBuffer =
+      Buffer.from(
+        cookieToken,
+        "hex",
+      );
+
+    const headerBuffer =
+      Buffer.from(
+        headerToken,
+        "hex",
+      );
+
+    if (
+      !crypto.timingSafeEqual(
+        cookieBuffer,
+        headerBuffer,
+      )
+    ) {
+      sendCsrfError(res);
+      return;
+    }
 
     next();
-  } catch {
-    res.status(500).json({
-      success: false,
-      message:
-        "Unable to initialize request security.",
-    });
-  }
-};
-
-export const requireCsrfToken: RequestHandler = (
-  req,
-  res,
-  next,
-) => {
-  if (SAFE_METHODS.has(req.method)) {
-    next();
-    return;
-  }
-
-  const cookieToken =
-    req.cookies?.[CSRF_COOKIE_NAME];
-
-  const headerToken =
-    req.get(CSRF_HEADER_NAME);
-
-  if (
-    !isValidCsrfToken(cookieToken) ||
-    !isValidCsrfToken(headerToken)
-  ) {
-    res.status(403).json({
-      success: false,
-      message: "Invalid CSRF token.",
-    });
-
-    return;
-  }
-
-  const cookieBuffer =
-    Buffer.from(cookieToken, "hex");
-
-  const headerBuffer =
-    Buffer.from(headerToken, "hex");
-
-  if (
-    !crypto.timingSafeEqual(
-      cookieBuffer,
-      headerBuffer,
-    )
-  ) {
-    res.status(403).json({
-      success: false,
-      message: "Invalid CSRF token.",
-    });
-
-    return;
-  }
-
-  next();
-};
+  };

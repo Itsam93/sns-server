@@ -253,7 +253,7 @@ export async function me(
     );
   }
 
-  const user =
+  const result =
     await getAuthenticatedUser(
       req.user.userId,
     );
@@ -262,8 +262,10 @@ export async function me(
     success: true,
     data: {
       user: sanitizeUser(
-        user.toObject(),
+        result.user.toObject(),
       ),
+      client:
+        result.client,
     },
   });
 }

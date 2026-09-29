@@ -21,6 +21,7 @@ export interface IAppointment
   extends Document {
   clientId: mongoose.Types.ObjectId;
   serviceId: mongoose.Types.ObjectId;
+  servicePackageId?: mongoose.Types.ObjectId;
 
   requestedDate: Date;
   requestedTime: string;
@@ -41,6 +42,7 @@ export interface IAppointment
   location?: string;
 
   bookingKey?: string;
+  activeBookingKey?: string;
 
   acceptedAt?: Date;
   completedAt?: Date;
@@ -52,6 +54,13 @@ export interface IAppointment
 
 const TIME_REGEX =
   /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const ACTIVE_STATUSES: AppointmentStatus[] = [
+  "pending",
+  "accepted",
+  "ongoing",
+  "rescheduled",
+];
 
 const appointmentSchema =
   new Schema<IAppointment>(
@@ -67,6 +76,13 @@ const appointmentSchema =
         type: Schema.Types.ObjectId,
         ref: "Service",
         required: true,
+        index: true,
+      },
+
+      servicePackageId: {
+        type: Schema.Types.ObjectId,
+        ref: "ServicePackage",
+        index: true,
       },
 
       requestedDate: {
@@ -160,6 +176,11 @@ const appointmentSchema =
         trim: true,
       },
 
+      activeBookingKey: {
+        type: String,
+        trim: true,
+      },
+
       acceptedAt: {
         type: Date,
       },
@@ -174,11 +195,20 @@ const appointmentSchema =
     },
     {
       timestamps: true,
+      versionKey: false,
+      strict: true,
+      strictQuery: true,
     },
   );
 
 appointmentSchema.index({
   clientId: 1,
+  status: 1,
+});
+
+appointmentSchema.index({
+  clientId: 1,
+  servicePackageId: 1,
   status: 1,
 });
 
@@ -208,8 +238,172 @@ appointmentSchema.index(
   },
 );
 
+appointmentSchema.index(
+  {
+    activeBookingKey: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      activeBookingKey: {
+        $exists: true,
+      },
+    },
+  },
+);
+
+appointmentSchema.pre(
+  "validate",
+  async function () {
+    const hasRequestedStart =
+      Boolean(this.requestedStart);
+
+    const hasRequestedEnd =
+      Boolean(this.requestedEnd);
+
+    if (
+      hasRequestedStart !==
+      hasRequestedEnd
+    ) {
+      throw new Error(
+        "Requested start and end must be provided together.",
+      );
+    }
+
+    if (
+      this.requestedStart &&
+      this.requestedEnd &&
+      this.requestedStart >=
+        this.requestedEnd
+    ) {
+      throw new Error(
+        "Requested appointment end must be after the start.",
+      );
+    }
+
+    const hasScheduledStart =
+      Boolean(this.scheduledStart);
+
+    const hasScheduledEnd =
+      Boolean(this.scheduledEnd);
+
+    if (
+      hasScheduledStart !==
+      hasScheduledEnd
+    ) {
+      throw new Error(
+        "Scheduled start and end must be provided together.",
+      );
+    }
+
+    if (
+      this.scheduledStart &&
+      this.scheduledEnd &&
+      this.scheduledStart >=
+        this.scheduledEnd
+    ) {
+      throw new Error(
+        "Scheduled appointment end must be after the start.",
+      );
+    }
+
+    if (
+      ACTIVE_STATUSES.includes(
+        this.status,
+      )
+    ) {
+      if (
+        !this.activeBookingKey
+      ) {
+        throw new Error(
+          "Active appointments must have an active booking key.",
+        );
+      }
+    } else if (
+      this.activeBookingKey
+    ) {
+      throw new Error(
+        "Inactive appointments cannot have an active booking key.",
+      );
+    }
+
+    if (
+      this.status ===
+        "accepted" ||
+      this.status ===
+        "ongoing" ||
+      this.status ===
+        "rescheduled" ||
+      this.status ===
+        "completed"
+    ) {
+      if (
+        !this.scheduledStart ||
+        !this.scheduledEnd
+      ) {
+        throw new Error(
+          "This appointment status requires a scheduled time.",
+        );
+      }
+    }
+
+    if (
+      this.status ===
+      "completed"
+    ) {
+      if (
+        !this.completedAt
+      ) {
+        throw new Error(
+          "Completed appointments must have completedAt.",
+        );
+      }
+    } else if (
+      this.completedAt
+    ) {
+      throw new Error(
+        "Only completed appointments may have completedAt.",
+      );
+    }
+
+    if (
+      this.status ===
+      "cancelled"
+    ) {
+      if (
+        !this.cancelledAt
+      ) {
+        throw new Error(
+          "Cancelled appointments must have cancelledAt.",
+        );
+      }
+    } else if (
+      this.cancelledAt
+    ) {
+      throw new Error(
+        "Only cancelled appointments may have cancelledAt.",
+      );
+    }
+
+    if (
+      this.status ===
+      "rejected"
+    ) {
+      if (
+        !this.rejectionReason
+      ) {
+        throw new Error(
+          "Rejected appointments must have a rejection reason.",
+        );
+      }
+    }
+  },
+);
+
 export const Appointment =
   mongoose.model<IAppointment>(
     "Appointment",
     appointmentSchema,
   );
+
+export default Appointment;

@@ -31,7 +31,9 @@ const router = Router();
 
 router.use(requireAuth);
 
-/* Client */
+/*
+ * Client
+ */
 
 router.get(
   "/eligibility",
@@ -52,7 +54,9 @@ router.get(
   asyncHandler(getMine),
 );
 
-/* Admin */
+/*
+ * Admin
+ */
 
 router.get(
   "/",
@@ -60,7 +64,9 @@ router.get(
   asyncHandler(getAll),
 );
 
-/* Shared */
+/*
+ * Shared
+ */
 
 router.get(
   "/:id",
@@ -73,7 +79,9 @@ router.patch(
   asyncHandler(cancel),
 );
 
-/* Admin appointment actions */
+/*
+ * Admin appointment actions
+ */
 
 router.patch(
   "/:id/accept",

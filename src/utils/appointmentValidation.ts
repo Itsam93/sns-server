@@ -51,6 +51,9 @@ export const createAppointmentSchema =
     serviceId:
       objectIdSchema,
 
+    servicePackageId:
+      objectIdSchema,
+
     requestedDate:
       appointmentDateSchema,
 

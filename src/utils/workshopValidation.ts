@@ -1,72 +1,102 @@
 import { z } from "zod";
 
-const timeSchema = z
-  .string()
-  .trim()
-  .regex(
-    /^([01]\d|2[0-3]):([0-5]\d)$/,
-    "Time must be in HH:mm format.",
-  );
+const timeSchema =
+  z
+    .string()
+    .trim()
+    .regex(
+      /^([01]\d|2[0-3]):([0-5]\d)$/,
+      "Time must be in HH:mm format.",
+    );
 
-const futureDateSchema = z.coerce
-  .date()
-  .refine(
-    (date) => !Number.isNaN(date.getTime()),
+const dateSchema =
+  z.coerce.date().refine(
+    (date) =>
+      !Number.isNaN(
+        date.getTime(),
+      ),
     {
-      message: "Date must be valid.",
+      message:
+        "Date must be valid.",
     },
   );
 
-const emailSchema = z
-  .string()
-  .trim()
-  .email(
-    "Please provide a valid email address.",
-  )
-  .max(320);
-
-const phoneSchema = z
-  .string()
-  .trim()
-  .max(
-    30,
-    "Phone number must not exceed 30 characters.",
-  )
-  .optional();
-
-const titleSchema = z
-  .string()
-  .trim()
-  .min(1, "Title is required.")
-  .max(200);
-
-const descriptionSchema = z
-  .string()
-  .trim()
-  .min(1, "Description is required.")
-  .max(5000);
-
-const slugSchema = z
-  .string()
-  .trim()
-  .min(1, "Slug is required.")
-  .max(250)
-  .regex(
-    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
-    "Slug must contain only lowercase letters, numbers, and hyphens.",
+const futureDateSchema =
+  dateSchema.refine(
+    (date) =>
+      date > new Date(),
+    {
+      message:
+        "Date must be in the future.",
+    },
   );
 
-const workshopTypeSchema = z.enum([
-  "workshop",
-  "seminar",
-]);
+const emailSchema =
+  z
+    .string()
+    .trim()
+    .email(
+      "Please provide a valid email address.",
+    )
+    .max(320);
 
-const workshopStatusSchema = z.enum([
-  "draft",
-  "published",
-  "completed",
-  "cancelled",
-]);
+const phoneSchema =
+  z
+    .string()
+    .trim()
+    .max(
+      30,
+      "Phone number must not exceed 30 characters.",
+    )
+    .optional();
+
+const titleSchema =
+  z
+    .string()
+    .trim()
+    .min(
+      1,
+      "Title is required.",
+    )
+    .max(200);
+
+const descriptionSchema =
+  z
+    .string()
+    .trim()
+    .min(
+      1,
+      "Description is required.",
+    )
+    .max(5000);
+
+const slugSchema =
+  z
+    .string()
+    .trim()
+    .min(
+      1,
+      "Slug is required.",
+    )
+    .max(250)
+    .regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Slug must contain only lowercase letters, numbers, and hyphens.",
+    );
+
+const workshopTypeSchema =
+  z.enum([
+    "workshop",
+    "seminar",
+  ]);
+
+const workshopStatusSchema =
+  z.enum([
+    "draft",
+    "published",
+    "completed",
+    "cancelled",
+  ]);
 
 const workshopRequestStatusSchema =
   z.enum([
@@ -86,31 +116,168 @@ const workshopParticipantStatusSchema =
     "no_show",
   ]);
 
-/*
- * Workshop
- */
+const ticketCodeSchema =
+  z
+    .string()
+    .trim()
+    .min(
+      1,
+      "Ticket code is required.",
+    )
+    .max(50)
+    .regex(
+      /^[a-z0-9_-]+$/,
+      "Ticket code must contain only lowercase letters, numbers, underscores, and hyphens.",
+    );
+
+const ticketNameSchema =
+  z
+    .string()
+    .trim()
+    .min(
+      1,
+      "Ticket name is required.",
+    )
+    .max(150);
+
+const ticketDescriptionSchema =
+  z
+    .string()
+    .trim()
+    .max(500)
+    .optional();
+
+const ticketAttendeeCountSchema =
+  z
+    .number()
+    .int()
+    .min(
+      1,
+      "Ticket attendee count must be at least 1.",
+    );
+
+const ticketPriceSchema =
+  z
+    .number()
+    .finite(
+      "Ticket price must be a valid number.",
+    )
+    .positive(
+      "Ticket price must be greater than zero.",
+    );
+
+const ticketPricingSchema =
+  z
+    .object({
+      NGN:
+        ticketPriceSchema.optional(),
+
+      USD:
+        ticketPriceSchema.optional(),
+    })
+    .refine(
+      ({
+        NGN,
+        USD,
+      }) =>
+        NGN !== undefined ||
+        USD !== undefined,
+      {
+        message:
+          "At least one ticket price is required.",
+        path: [
+          "NGN",
+        ],
+      },
+    );
+
+const workshopTicketTypeSchema =
+  z.object({
+    code:
+      ticketCodeSchema,
+
+    name:
+      ticketNameSchema,
+
+    description:
+      ticketDescriptionSchema,
+
+    attendeeCount:
+      ticketAttendeeCountSchema,
+
+    pricing:
+      ticketPricingSchema,
+
+    isActive:
+      z.boolean().optional(),
+  });
+
+const workshopTicketsSchema =
+  z
+    .array(
+      workshopTicketTypeSchema,
+    )
+    .min(
+      1,
+      "At least one workshop ticket type is required.",
+    )
+    .superRefine(
+      (
+        tickets,
+        context,
+      ) => {
+        const codes =
+          tickets.map(
+            (ticket) =>
+              ticket.code,
+          );
+
+        const uniqueCodes =
+          new Set(codes);
+
+        if (
+          uniqueCodes.size !==
+          codes.length
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode
+                .custom,
+            path: [
+              "ticketTypes",
+            ],
+            message:
+              "Workshop ticket type codes must be unique.",
+          });
+        }
+      },
+    );
 
 const workshopFields = {
-  title: titleSchema,
+  title:
+    titleSchema,
 
-  slug: slugSchema,
+  slug:
+    slugSchema,
 
-  type: workshopTypeSchema,
+  type:
+    workshopTypeSchema,
 
   description:
     descriptionSchema,
 
-  shortDescription: z
-    .string()
-    .trim()
-    .max(500)
-    .optional(),
+  shortDescription:
+    z
+      .string()
+      .trim()
+      .max(500)
+      .optional(),
 
   startDate:
-    futureDateSchema,
+    dateSchema,
 
   endDate:
-    futureDateSchema.optional(),
+    dateSchema.optional(),
 
   startTime:
     timeSchema.optional(),
@@ -118,187 +285,284 @@ const workshopFields = {
   endTime:
     timeSchema.optional(),
 
-  location: z
-    .string()
-    .trim()
-    .max(500)
-    .optional(),
+  location:
+    z
+      .string()
+      .trim()
+      .max(500)
+      .optional(),
 
   isOnline:
-    z.boolean().optional(),
+    z.boolean(),
 
-  meetingLink: z
-    .string()
-    .trim()
-    .url(
-      "Meeting link must be a valid URL.",
-    )
-    .max(1000)
-    .optional(),
+  meetingLink:
+    z
+      .string()
+      .trim()
+      .url(
+        "Meeting link must be a valid URL.",
+      )
+      .max(1000)
+      .optional(),
 
-  capacity: z
-    .number()
-    .int()
-    .min(
-      1,
-      "Capacity must be at least 1.",
-    )
-    .optional(),
+  capacity:
+    z
+      .number()
+      .int()
+      .min(
+        1,
+        "Capacity must be at least 1.",
+      )
+      .optional(),
 
   registrationRequired:
-    z.boolean().optional(),
+    z.boolean(),
 
   registrationDeadline:
-    futureDateSchema.optional(),
+    dateSchema.optional(),
+
+  ticketTypes:
+    workshopTicketsSchema,
 
   status:
-    workshopStatusSchema.optional(),
+    workshopStatusSchema
+      .optional(),
 
-  featuredImage: z
-    .string()
-    .trim()
-    .max(1000)
-    .optional(),
+  featuredImage:
+    z
+      .string()
+      .trim()
+      .max(1000)
+      .optional(),
 };
 
-const workshopValidation =
-  z.object(workshopFields);
-
-export const createWorkshopSchema =
-  workshopValidation
-    .refine(
-      ({ endDate, startDate }) =>
-        !endDate ||
-        endDate >= startDate,
-      {
+const validateWorkshopDates =
+  (
+    data: {
+      endDate?: Date;
+      startDate?: Date;
+      startTime?: string;
+      endTime?: string;
+      registrationDeadline?: Date;
+      isOnline?: boolean;
+      location?: string;
+      meetingLink?: string;
+      capacity?: number;
+    },
+    context: z.RefinementCtx,
+  ) => {
+    if (
+      data.endDate &&
+      data.startDate &&
+      data.endDate <
+        data.startDate
+    ) {
+      context.addIssue({
+        code:
+          z.ZodIssueCode.custom,
+        path: [
+          "endDate",
+        ],
         message:
           "End date must not be before the start date.",
-        path: ["endDate"],
-      },
-    )
-    .refine(
-      ({ startTime, endTime }) =>
-        !startTime ||
-        !endTime ||
-        startTime < endTime,
-      {
+      });
+    }
+
+    if (
+      data.startTime &&
+      data.endTime &&
+      data.startTime >=
+        data.endTime
+    ) {
+      context.addIssue({
+        code:
+          z.ZodIssueCode.custom,
+        path: [
+          "endTime",
+        ],
         message:
           "End time must be later than start time.",
-        path: ["endTime"],
-      },
-    )
-    .refine(
-      ({ isOnline, location }) =>
-        !isOnline || !location,
-      {
+      });
+    }
+
+    if (
+      data.isOnline === true &&
+      data.location
+    ) {
+      context.addIssue({
+        code:
+          z.ZodIssueCode.custom,
+        path: [
+          "location",
+        ],
         message:
           "Online workshops should not have a physical location.",
-        path: ["location"],
-      },
-    )
-    .refine(
-      ({
-        isOnline,
-        meetingLink,
-      }) =>
-        !isOnline ||
-        Boolean(meetingLink),
-      {
+      });
+    }
+
+    if (
+      data.isOnline === true &&
+      !data.meetingLink
+    ) {
+      context.addIssue({
+        code:
+          z.ZodIssueCode.custom,
+        path: [
+          "meetingLink",
+        ],
         message:
           "Meeting link is required for online workshops.",
-        path: ["meetingLink"],
-      },
-    )
-    .refine(
-      ({
-        registrationDeadline,
-        startDate,
-      }) =>
-        !registrationDeadline ||
-        registrationDeadline <=
-          startDate,
-      {
+      });
+    }
+
+    if (
+      data.isOnline === false &&
+      !data.location
+    ) {
+      context.addIssue({
+        code:
+          z.ZodIssueCode.custom,
+        path: [
+          "location",
+        ],
         message:
-          "Registration deadline must not be after the workshop start date.",
+          "Physical workshops must have a location.",
+      });
+    }
+
+    if (
+      data.registrationDeadline &&
+      data.startDate &&
+      data.registrationDeadline >
+        data.startDate
+    ) {
+      context.addIssue({
+        code:
+          z.ZodIssueCode.custom,
         path: [
           "registrationDeadline",
         ],
-      },
+        message:
+          "Registration deadline must not be after the workshop start date.",
+      });
+    }
+  };
+
+export const createWorkshopSchema =
+  z
+    .object(
+      workshopFields,
+    )
+    .superRefine(
+      validateWorkshopDates,
     );
 
 export const updateWorkshopSchema =
   z
-    .object(workshopFields)
+    .object(
+      workshopFields,
+    )
     .partial()
-    .refine(
-      ({
-        endDate,
-        startDate,
-      }) =>
-        !endDate ||
-        !startDate ||
-        endDate >= startDate,
-      {
-        message:
-          "End date must not be before the start date.",
-        path: ["endDate"],
-      },
-    )
-    .refine(
-      ({
-        startTime,
-        endTime,
-      }) =>
-        !startTime ||
-        !endTime ||
-        startTime < endTime,
-      {
-        message:
-          "End time must be later than start time.",
-        path: ["endTime"],
-      },
-    )
-    .refine(
-      ({
-        isOnline,
-        location,
-      }) =>
-        isOnline !== true ||
-        !location,
-      {
-        message:
-          "Online workshops should not have a physical location.",
-        path: ["location"],
-      },
-    )
-    .refine(
-      ({
-        isOnline,
-        meetingLink,
-      }) =>
-        isOnline !== true ||
-        Boolean(meetingLink),
-      {
-        message:
-          "Meeting link is required for online workshops.",
-        path: ["meetingLink"],
-      },
-    )
-    .refine(
-      ({
-        registrationDeadline,
-        startDate,
-      }) =>
-        !registrationDeadline ||
-        !startDate ||
-        registrationDeadline <=
-          startDate,
-      {
-        message:
-          "Registration deadline must not be after the workshop start date.",
-        path: [
-          "registrationDeadline",
-        ],
+    .superRefine(
+      (
+        data,
+        context,
+      ) => {
+        if (
+          data.endDate &&
+          data.startDate &&
+          data.endDate <
+            data.startDate
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode.custom,
+            path: [
+              "endDate",
+            ],
+            message:
+              "End date must not be before the start date.",
+          });
+        }
+
+        if (
+          data.startTime &&
+          data.endTime &&
+          data.startTime >=
+            data.endTime
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode.custom,
+            path: [
+              "endTime",
+            ],
+            message:
+              "End time must be later than start time.",
+          });
+        }
+
+        if (
+          data.isOnline === true &&
+          data.location
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode.custom,
+            path: [
+              "location",
+            ],
+            message:
+              "Online workshops should not have a physical location.",
+          });
+        }
+
+        if (
+          data.isOnline === true &&
+          !data.meetingLink
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode.custom,
+            path: [
+              "meetingLink",
+            ],
+            message:
+              "Meeting link is required for online workshops.",
+          });
+        }
+
+        if (
+          data.isOnline === false &&
+          !data.location
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode.custom,
+            path: [
+              "location",
+            ],
+            message:
+              "Physical workshops must have a location.",
+          });
+        }
+
+        if (
+          data.registrationDeadline &&
+          data.startDate &&
+          data.registrationDeadline >
+            data.startDate
+        ) {
+          context.addIssue({
+            code:
+              z.ZodIssueCode.custom,
+            path: [
+              "registrationDeadline",
+            ],
+            message:
+              "Registration deadline must not be after the workshop start date.",
+          });
+        }
       },
     );
 
@@ -309,29 +573,34 @@ export const updateWorkshopSchema =
 export const createWorkshopRequestSchema =
   z
     .object({
-      requesterType: z.enum([
-        "individual",
-        "organisation",
-      ]),
+      requesterType:
+        z.enum([
+          "individual",
+          "organisation",
+        ]),
 
-      fullName: z
-        .string()
-        .trim()
-        .min(
-          1,
-          "Full name is required.",
-        )
-        .max(200),
+      fullName:
+        z
+          .string()
+          .trim()
+          .min(
+            1,
+            "Full name is required.",
+          )
+          .max(200),
 
-      email: emailSchema,
+      email:
+        emailSchema,
 
-      phone: phoneSchema,
+      phone:
+        phoneSchema,
 
-      organisationName: z
-        .string()
-        .trim()
-        .max(200)
-        .optional(),
+      organisationName:
+        z
+          .string()
+          .trim()
+          .max(200)
+          .optional(),
 
       proposedTitle:
         titleSchema,
@@ -340,22 +609,25 @@ export const createWorkshopRequestSchema =
         descriptionSchema,
 
       preferredDate:
-        futureDateSchema.optional(),
+        futureDateSchema
+          .optional(),
 
-      expectedParticipants: z
-        .number()
-        .int()
-        .min(
-          1,
-          "Expected participants must be at least 1.",
-        )
-        .optional(),
+      expectedParticipants:
+        z
+          .number()
+          .int()
+          .min(
+            1,
+            "Expected participants must be at least 1.",
+          )
+          .optional(),
 
-      location: z
-        .string()
-        .trim()
-        .max(500)
-        .optional(),
+      location:
+        z
+          .string()
+          .trim()
+          .max(500)
+          .optional(),
 
       isOnline:
         z.boolean().optional(),
@@ -392,24 +664,28 @@ export const createWorkshopRequestSchema =
 
 export const createWorkshopParticipantSchema =
   z.object({
-    fullName: z
-      .string()
-      .trim()
-      .min(
-        1,
-        "Full name is required.",
-      )
-      .max(200),
+    fullName:
+      z
+        .string()
+        .trim()
+        .min(
+          1,
+          "Full name is required.",
+        )
+        .max(200),
 
-    email: emailSchema,
+    email:
+      emailSchema,
 
-    phone: phoneSchema,
+    phone:
+      phoneSchema,
 
-    organisationName: z
-      .string()
-      .trim()
-      .max(200)
-      .optional(),
+    organisationName:
+      z
+        .string()
+        .trim()
+        .max(200)
+        .optional(),
   });
 
 /*
@@ -418,46 +694,50 @@ export const createWorkshopParticipantSchema =
 
 export const workshopIdSchema =
   z.object({
-    id: z
-      .string()
-      .trim()
-      .min(
-        1,
-        "Workshop ID is required.",
-      ),
+    id:
+      z
+        .string()
+        .trim()
+        .min(
+          1,
+          "Workshop ID is required.",
+        ),
   });
 
 export const workshopIdParamSchema =
   z.object({
-    workshopId: z
-      .string()
-      .trim()
-      .min(
-        1,
-        "Workshop ID is required.",
-      ),
+    workshopId:
+      z
+        .string()
+        .trim()
+        .min(
+          1,
+          "Workshop ID is required.",
+        ),
   });
 
 export const workshopRequestIdSchema =
   z.object({
-    id: z
-      .string()
-      .trim()
-      .min(
-        1,
-        "Workshop request ID is required.",
-      ),
+    id:
+      z
+        .string()
+        .trim()
+        .min(
+          1,
+          "Workshop request ID is required.",
+        ),
   });
 
 export const workshopParticipantIdSchema =
   z.object({
-    id: z
-      .string()
-      .trim()
-      .min(
-        1,
-        "Workshop participant ID is required.",
-      ),
+    id:
+      z
+        .string()
+        .trim()
+        .min(
+          1,
+          "Workshop participant ID is required.",
+        ),
   });
 
 /*
@@ -475,11 +755,12 @@ export const updateWorkshopRequestStatusSchema =
     status:
       workshopRequestStatusSchema,
 
-    adminNote: z
-      .string()
-      .trim()
-      .max(3000)
-      .optional(),
+    adminNote:
+      z
+        .string()
+        .trim()
+        .max(3000)
+        .optional(),
   });
 
 export const updateParticipantStatusSchema =

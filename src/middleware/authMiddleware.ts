@@ -5,19 +5,39 @@ import mongoose from "mongoose";
 
 import { Client } from "../models/Client.js";
 import { User } from "../models/User.js";
+
+import {
+  AppError,
+} from "../utils/appError.js";
+
 import {
   verifyAccessToken,
 } from "../utils/jwt.js";
 
 const AUTH_ERROR = {
   success: false,
+  code: "AUTHENTICATION_REQUIRED",
   message: "Authentication required.",
-};
+} as const;
 
 const ADMIN_ERROR = {
   success: false,
+  code: "FORBIDDEN",
   message: "Administrator access required.",
-};
+} as const;
+
+function sendAuthError(
+  res: Parameters<RequestHandler>[1],
+  error: AppError,
+): void {
+  res.status(error.statusCode).json({
+    success: false,
+    code:
+      error.code ??
+      "AUTHENTICATION_REQUIRED",
+    message: error.message,
+  });
+}
 
 export const requireAuth: RequestHandler =
   async (req, res, next) => {
@@ -37,6 +57,7 @@ export const requireAuth: RequestHandler =
         res
           .status(401)
           .json(AUTH_ERROR);
+
         return;
       }
 
@@ -51,6 +72,7 @@ export const requireAuth: RequestHandler =
         res
           .status(401)
           .json(AUTH_ERROR);
+
         return;
       }
 
@@ -59,21 +81,39 @@ export const requireAuth: RequestHandler =
           _id: payload.userId,
           isActive: true,
         })
-          .select("_id role")
+          .select(
+            "_id role passwordVersion",
+          )
           .lean();
 
       if (!user) {
         res
           .status(401)
           .json(AUTH_ERROR);
+
         return;
       }
 
-      if (user.role !== payload.role) {
+      if (
+        user.role !==
+        payload.role
+      ) {
         res
           .status(401)
           .json(AUTH_ERROR);
+
         return;
+      }
+
+      if (
+        user.passwordVersion !==
+        payload.passwordVersion
+      ) {
+        throw new AppError(
+          "Your session is no longer valid. Please sign in again.",
+          401,
+          "SESSION_INVALIDATED",
+        );
       }
 
       if (user.role === "client") {
@@ -88,6 +128,7 @@ export const requireAuth: RequestHandler =
           res
             .status(401)
             .json(AUTH_ERROR);
+
           return;
         }
 
@@ -100,6 +141,7 @@ export const requireAuth: RequestHandler =
         };
 
         next();
+
         return;
       }
 
@@ -111,18 +153,28 @@ export const requireAuth: RequestHandler =
         };
 
         next();
+
         return;
       }
 
       res
         .status(401)
         .json(AUTH_ERROR);
-    } catch {
-      res.status(401).json({
-        success: false,
-        message:
-          "Invalid or expired authentication.",
-      });
+    } catch (error: unknown) {
+      if (
+        error instanceof AppError
+      ) {
+        sendAuthError(
+          res,
+          error,
+        );
+
+        return;
+      }
+
+      res
+        .status(401)
+        .json(AUTH_ERROR);
     }
   };
 
@@ -135,6 +187,7 @@ export const requireAdmin: RequestHandler =
       res
         .status(403)
         .json(ADMIN_ERROR);
+
       return;
     }
 

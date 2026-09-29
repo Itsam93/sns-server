@@ -1,13 +1,23 @@
-import { Appointment } from "../models/Appointment.js";
+import mongoose, {
+  type ClientSession,
+  type HydratedDocument,
+} from "mongoose";
+
+import {
+  Appointment,
+  type IAppointment,
+} from "../models/Appointment.js";
 import {
   Availability,
   type DayOfWeek,
 } from "../models/Availability.js";
-import {
-  AvailabilityException,
-} from "../models/AvailabilityException.js";
+import { AvailabilityException } from "../models/AvailabilityException.js";
 import { Client } from "../models/Client.js";
 import { Service } from "../models/Service.js";
+import {
+  ServicePackage,
+  type IServicePackage,
+} from "../models/ServicePackage.js";
 import { AppError } from "../utils/appError.js";
 import {
   notifyAppointmentAccepted,
@@ -40,6 +50,16 @@ type SessionType =
 type CreateAppointmentInput = {
   clientId: string;
   serviceId: string;
+  servicePackageId: string;
+  requestedDate: Date;
+  requestedTime: string;
+  sessionType: SessionType;
+};
+
+type CreateAppointmentFromPaymentInput = {
+  paymentId: string;
+  clientId: string;
+  serviceId: string;
   requestedDate: Date;
   requestedTime: string;
   sessionType: SessionType;
@@ -65,12 +85,13 @@ type TimeWindow = {
   endTime: string;
 };
 
+type AppointmentDocument =
+  HydratedDocument<IAppointment>;
+
 function getDayOfWeek(
   date: Date,
 ): DayOfWeek | null {
-  const days: Array<
-    DayOfWeek | null
-  > = [
+  const days: Array<DayOfWeek | null> = [
     null,
     "monday",
     "tuesday",
@@ -85,20 +106,17 @@ function getDayOfWeek(
 
 function isWeekend(
   date: Date,
-) {
+): boolean {
   const day = date.getDay();
 
-  return (
-    day === 0 ||
-    day === 6
-  );
+  return day === 0 || day === 6;
 }
 
 function validateTimeFormat(
   time: string,
-) {
+): void {
   if (
-    !/^([01]\d|2[0-3]):([0-5]\d)$/.test(
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(
       time,
     )
   ) {
@@ -112,7 +130,7 @@ function validateTimeFormat(
 function combineDateAndTime(
   date: Date,
   time: string,
-) {
+): Date {
   validateTimeFormat(time);
 
   const [
@@ -120,28 +138,18 @@ function combineDateAndTime(
     minutesText,
   ] = time.split(":");
 
-  if (
-    !hoursText ||
-    !minutesText
-  ) {
+  if (!hoursText || !minutesText) {
     throw new AppError(
       "Invalid appointment time.",
       400,
     );
   }
 
-  const hours =
-    Number(hoursText);
-
-  const minutes =
-    Number(minutesText);
-
-  const result =
-    new Date(date);
+  const result = new Date(date);
 
   result.setHours(
-    hours,
-    minutes,
+    Number(hoursText),
+    Number(minutesText),
     0,
     0,
   );
@@ -152,7 +160,7 @@ function combineDateAndTime(
 function addMinutes(
   date: Date,
   minutes: number,
-) {
+): Date {
   return new Date(
     date.getTime() +
       minutes * 60 * 1000,
@@ -161,9 +169,8 @@ function addMinutes(
 
 function normalizeDate(
   date: Date,
-) {
-  const result =
-    new Date(date);
+): Date {
+  const result = new Date(date);
 
   result.setHours(
     0,
@@ -178,11 +185,9 @@ function normalizeDate(
 function getDayRange(
   date: Date,
 ) {
-  const start =
-    normalizeDate(date);
+  const start = normalizeDate(date);
 
-  const end =
-    new Date(start);
+  const end = new Date(start);
 
   end.setDate(
     end.getDate() + 1,
@@ -192,6 +197,22 @@ function getDayRange(
     start,
     end,
   };
+}
+
+function normalizeDateInput(
+  date: Date,
+): Date {
+  if (
+    !(date instanceof Date) ||
+    Number.isNaN(date.getTime())
+  ) {
+    throw new AppError(
+      "Invalid appointment date.",
+      400,
+    );
+  }
+
+  return normalizeDate(date);
 }
 
 async function getScheduleForDate(
@@ -216,25 +237,19 @@ async function getScheduleForDate(
     }).lean();
 
   if (exception) {
-    if (
-      exception.type ===
-      "blocked"
-    ) {
+    if (exception.type === "blocked") {
       return [];
     }
 
     if (
-      exception.type ===
-        "custom" &&
+      exception.type === "custom" &&
       exception.startTime &&
       exception.endTime
     ) {
       return [
         {
-          startTime:
-            exception.startTime,
-          endTime:
-            exception.endTime,
+          startTime: exception.startTime,
+          endTime: exception.endTime,
         },
       ];
     }
@@ -261,10 +276,8 @@ async function getScheduleForDate(
 
   return availability.map(
     (item) => ({
-      startTime:
-        item.startTime,
-      endTime:
-        item.endTime,
+      startTime: item.startTime,
+      endTime: item.endTime,
     }),
   );
 }
@@ -272,6 +285,17 @@ async function getScheduleForDate(
 async function validateClient(
   clientId: string,
 ) {
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      clientId,
+    )
+  ) {
+    throw new AppError(
+      "Invalid client ID.",
+      400,
+    );
+  }
+
   const client =
     await Client.findById(
       clientId,
@@ -292,6 +316,17 @@ async function validateClient(
 async function validateService(
   serviceId: string,
 ) {
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      serviceId,
+    )
+  ) {
+    throw new AppError(
+      "Invalid service ID.",
+      400,
+    );
+  }
+
   const service =
     await Service.findOne({
       _id: serviceId,
@@ -305,7 +340,93 @@ async function validateService(
     );
   }
 
+  if (
+    !Number.isInteger(
+      service.durationMinutes,
+    ) ||
+    service.durationMinutes <= 0
+  ) {
+    throw new AppError(
+      "The selected service has an invalid duration.",
+      500,
+    );
+  }
+
   return service;
+}
+
+async function validateServicePackage(
+  servicePackageId: string,
+  clientId: string,
+  serviceId: string,
+  session?: ClientSession,
+): Promise<
+  HydratedDocument<IServicePackage>
+> {
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      servicePackageId,
+    )
+  ) {
+    throw new AppError(
+      "Invalid service package ID.",
+      400,
+    );
+  }
+
+  const query =
+    ServicePackage.findOne({
+      _id: servicePackageId,
+      clientId,
+      serviceId,
+    });
+
+  if (session) {
+    query.session(session);
+  }
+
+  const servicePackage =
+    await query;
+
+  if (!servicePackage) {
+    throw new AppError(
+      "The selected service package was not found or does not belong to this service.",
+      404,
+    );
+  }
+
+  if (
+    servicePackage.status !==
+    "active"
+  ) {
+    throw new AppError(
+      "The selected service package is not active.",
+      409,
+    );
+  }
+
+  if (
+    servicePackage.remainingSessions <=
+    0
+  ) {
+    throw new AppError(
+      "The selected service package has no remaining sessions.",
+      409,
+    );
+  }
+
+  if (
+    servicePackage.expiresAt &&
+    servicePackage.expiresAt.getTime() <=
+      Date.now()
+  ) {
+    throw new AppError(
+      "The selected service package has expired.",
+      409,
+    );
+  }
+
+  return servicePackage;
 }
 
 async function validateDateAndAvailability(
@@ -313,27 +434,31 @@ async function validateDateAndAvailability(
   time: string,
   durationMinutes: number,
 ) {
-  if (
-    Number.isNaN(
-      date.getTime(),
-    )
-  ) {
-    throw new AppError(
-      "Invalid appointment date.",
-      400,
-    );
-  }
+  const normalizedDate =
+    normalizeDateInput(date);
 
-  if (isWeekend(date)) {
+  if (isWeekend(normalizedDate)) {
     throw new AppError(
       "Appointments are only available from Monday to Friday.",
       400,
     );
   }
 
+  if (
+    !Number.isInteger(
+      durationMinutes,
+    ) ||
+    durationMinutes <= 0
+  ) {
+    throw new AppError(
+      "The selected service has an invalid duration.",
+      500,
+    );
+  }
+
   const start =
     combineDateAndTime(
-      date,
+      normalizedDate,
       time,
     );
 
@@ -343,9 +468,7 @@ async function validateDateAndAvailability(
       durationMinutes,
     );
 
-  if (
-    start <= new Date()
-  ) {
+  if (start <= new Date()) {
     throw new AppError(
       "Appointment time must be in the future.",
       400,
@@ -354,7 +477,7 @@ async function validateDateAndAvailability(
 
   const schedule =
     await getScheduleForDate(
-      date,
+      normalizedDate,
     );
 
   if (!schedule.length) {
@@ -369,13 +492,13 @@ async function validateDateAndAvailability(
       (window) => {
         const windowStart =
           combineDateAndTime(
-            date,
+            normalizedDate,
             window.startTime,
           );
 
         const windowEnd =
           combineDateAndTime(
-            date,
+            normalizedDate,
             window.endTime,
           );
 
@@ -394,12 +517,13 @@ async function validateDateAndAvailability(
   }
 
   return {
+    date: normalizedDate,
     start,
     end,
   };
 }
 
-async function checkScheduleConflict(
+function getConflictQuery(
   start: Date,
   end: Date,
   excludeAppointmentId?: string,
@@ -415,23 +539,28 @@ async function checkScheduleConflict(
 
     $or: [
       {
+        status: "pending",
         requestedStart: {
           $lt: end,
           $exists: true,
         },
-
         requestedEnd: {
           $gt: start,
           $exists: true,
         },
       },
-
       {
+        status: {
+          $in: [
+            "accepted",
+            "ongoing",
+            "rescheduled",
+          ],
+        },
         scheduledStart: {
           $lt: end,
           $exists: true,
         },
-
         scheduledEnd: {
           $gt: start,
           $exists: true,
@@ -446,34 +575,88 @@ async function checkScheduleConflict(
     };
   }
 
-  return Appointment.findOne(
-    query,
-  );
+  return query;
+}
+
+async function checkScheduleConflict(
+  start: Date,
+  end: Date,
+  excludeAppointmentId?: string,
+  session?: ClientSession,
+) {
+  const request =
+    Appointment.findOne(
+      getConflictQuery(
+        start,
+        end,
+        excludeAppointmentId,
+      ),
+    );
+
+  if (session) {
+    request.session(session);
+  }
+
+  return request;
 }
 
 function createBookingKey(
   start: Date,
   end: Date,
-) {
+): string {
   return `${start.getTime()}-${end.getTime()}`;
+}
+
+function createActiveBookingKey(
+  clientId: string,
+): string {
+  return clientId;
 }
 
 function isDuplicateKeyError(
   error: unknown,
-) {
+): boolean {
   return (
-    typeof error ===
-      "object" &&
+    typeof error === "object" &&
     error !== null &&
     "code" in error &&
     error.code === 11000
   );
 }
 
+function getDuplicateKeyFields(
+  error: unknown,
+): Record<
+  string,
+  unknown
+> | null {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("keyPattern" in error)
+  ) {
+    return null;
+  }
+
+  const keyPattern =
+    error.keyPattern;
+
+  if (
+    typeof keyPattern !== "object" ||
+    keyPattern === null
+  ) {
+    return null;
+  }
+
+  return keyPattern as Record<
+    string,
+    unknown
+  >;
+}
+
 async function sendAppointmentNotificationSafely(
-  notification:
-    () => Promise<unknown>,
-) {
+  notification: () => Promise<unknown>,
+): Promise<void> {
   try {
     await notification();
   } catch (error) {
@@ -482,6 +665,32 @@ async function sendAppointmentNotificationSafely(
       error,
     );
   }
+}
+
+function getActiveBookingKey(
+  appointment: IAppointment,
+): string {
+  return createActiveBookingKey(
+    appointment.clientId.toString(),
+  );
+}
+
+function clearActiveBooking(
+  appointment: IAppointment,
+): void {
+  appointment.activeBookingKey =
+    undefined;
+}
+
+function clearAppointmentSlot(
+  appointment: IAppointment,
+): void {
+  appointment.bookingKey =
+    undefined;
+
+  clearActiveBooking(
+    appointment,
+  );
 }
 
 /*
@@ -493,9 +702,7 @@ async function sendAppointmentNotificationSafely(
 export async function canClientBook(
   clientId: string,
 ) {
-  await validateClient(
-    clientId,
-  );
+  await validateClient(clientId);
 
   const appointment =
     await Appointment.findOne({
@@ -521,8 +728,7 @@ export async function canClientBook(
   return {
     canBook: false,
     appointment,
-    reason:
-      "ACTIVE_APPOINTMENT",
+    reason: "ACTIVE_APPOINTMENT",
   };
 }
 
@@ -534,22 +740,10 @@ export async function canClientBook(
 
 export async function createAppointment(
   input: CreateAppointmentInput,
-) {
+): Promise<AppointmentDocument> {
   await validateClient(
     input.clientId,
   );
-
-  const eligibility =
-    await canClientBook(
-      input.clientId,
-    );
-
-  if (!eligibility.canBook) {
-    throw new AppError(
-      "You already have an active appointment and cannot book another session.",
-      409,
-    );
-  }
 
   const service =
     await validateService(
@@ -557,6 +751,7 @@ export async function createAppointment(
     );
 
   const {
+    date,
     start,
     end,
   } =
@@ -566,17 +761,321 @@ export async function createAppointment(
       service.durationMinutes,
     );
 
-  const conflict =
-    await checkScheduleConflict(
+  const bookingKey =
+    createBookingKey(
       start,
       end,
     );
 
-  if (conflict) {
-    throw new AppError(
-      "The selected time is no longer available.",
-      409,
+  const activeBookingKey =
+    createActiveBookingKey(
+      input.clientId,
     );
+
+  const session =
+    await mongoose.startSession();
+
+  let appointmentId: string | null =
+    null;
+
+  try {
+    await session.withTransaction(
+      async () => {
+        const existingActiveAppointment =
+          await Appointment.findOne({
+            clientId:
+              input.clientId,
+            status: {
+              $in:
+                ACTIVE_APPOINTMENT_STATUSES,
+            },
+          })
+            .session(session)
+            .select("_id");
+
+        if (
+          existingActiveAppointment
+        ) {
+          throw new AppError(
+            "You already have an active appointment and cannot book another session.",
+            409,
+          );
+        }
+
+        await validateServicePackage(
+          input.servicePackageId,
+          input.clientId,
+          input.serviceId,
+          session,
+        );
+
+        const conflict =
+          await checkScheduleConflict(
+            start,
+            end,
+            undefined,
+            session,
+          );
+
+        if (conflict) {
+          throw new AppError(
+            "The selected time is no longer available.",
+            409,
+          );
+        }
+
+        const createdAppointment =
+          new Appointment({
+            clientId:
+              input.clientId,
+            serviceId:
+              input.serviceId,
+            servicePackageId:
+              input.servicePackageId,
+            requestedDate:
+              date,
+            requestedTime:
+              input.requestedTime,
+            requestedStart:
+              start,
+            requestedEnd:
+              end,
+            sessionType:
+              input.sessionType,
+            status: "pending",
+            bookingKey,
+            activeBookingKey,
+          });
+
+        await createdAppointment.save({
+          session,
+        });
+
+        appointmentId =
+          createdAppointment._id.toString();
+      },
+    );
+  } catch (error: unknown) {
+    if (
+      isDuplicateKeyError(error)
+    ) {
+      const duplicateFields =
+        getDuplicateKeyFields(
+          error,
+        );
+
+      if (
+        duplicateFields &&
+        "activeBookingKey" in
+          duplicateFields
+      ) {
+        throw new AppError(
+          "You already have an active appointment and cannot book another session.",
+          409,
+        );
+      }
+
+      throw new AppError(
+        "The selected time is no longer available.",
+        409,
+      );
+    }
+
+    throw error;
+  } finally {
+    await session.endSession();
+  }
+
+  if (!appointmentId) {
+    throw new AppError(
+      "Unable to create the appointment.",
+      500,
+    );
+  }
+
+  await sendAppointmentNotificationSafely(
+    () =>
+      notifyAppointmentCreated(
+        appointmentId!,
+      ),
+  );
+
+  const appointment =
+    await Appointment.findById(
+      appointmentId,
+    )
+      .populate("clientId")
+      .populate("serviceId")
+      .populate("servicePackageId");
+
+  if (!appointment) {
+    throw new AppError(
+      "Appointment not found after creation.",
+      500,
+    );
+  }
+
+  return appointment;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Create Appointment From Successful Service Payment
+|--------------------------------------------------------------------------
+*/
+
+export async function createAppointmentFromPayment(
+  input: CreateAppointmentFromPaymentInput,
+): Promise<AppointmentDocument> {
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      input.paymentId,
+    )
+  ) {
+    throw new AppError(
+      "Invalid payment ID.",
+      400,
+    );
+  }
+
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      input.clientId,
+    )
+  ) {
+    throw new AppError(
+      "Invalid client ID.",
+      400,
+    );
+  }
+
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      input.serviceId,
+    )
+  ) {
+    throw new AppError(
+      "Invalid service ID.",
+      400,
+    );
+  }
+
+  const existingServicePackage =
+    await ServicePackage.findOne({
+      paymentId:
+        input.paymentId,
+    });
+
+  if (existingServicePackage) {
+    if (
+      existingServicePackage.clientId.toString() !==
+        input.clientId ||
+      existingServicePackage.serviceId.toString() !==
+        input.serviceId
+    ) {
+      throw new AppError(
+        "The payment is not associated with the requested service.",
+        409,
+      );
+    }
+
+    const existingAppointment =
+      await Appointment.findOne({
+        servicePackageId:
+          existingServicePackage._id,
+        clientId:
+          input.clientId,
+        serviceId:
+          input.serviceId,
+      }).sort({
+        createdAt: -1,
+      });
+
+    if (existingAppointment) {
+      const populatedAppointment =
+        await Appointment.findById(
+          existingAppointment._id,
+        )
+          .populate("clientId")
+          .populate("serviceId")
+          .populate("servicePackageId");
+
+      if (!populatedAppointment) {
+        throw new AppError(
+          "Appointment not found after payment fulfilment.",
+          500,
+        );
+      }
+
+      return populatedAppointment;
+    }
+
+    if (
+      existingServicePackage.status !==
+      "active"
+    ) {
+      throw new AppError(
+        "The service package associated with this payment is not active.",
+        409,
+      );
+    }
+
+    if (
+      existingServicePackage.remainingSessions <=
+      0
+    ) {
+      throw new AppError(
+        "The service package associated with this payment has no remaining sessions.",
+        409,
+      );
+    }
+  }
+
+  await validateClient(
+    input.clientId,
+  );
+
+  const service =
+    await validateService(
+      input.serviceId,
+    );
+
+  const {
+    date,
+    start,
+    end,
+  } =
+    await validateDateAndAvailability(
+      input.requestedDate,
+      input.requestedTime,
+      service.durationMinutes,
+    );
+
+  let totalSessions = 1;
+
+  if (
+    service.type ===
+    "session_package"
+  ) {
+    const sessionCount =
+      service.sessionCount;
+
+    if (
+      sessionCount ===
+        undefined ||
+      !Number.isInteger(
+        sessionCount,
+      ) ||
+      sessionCount <= 0
+    ) {
+      throw new AppError(
+        "The selected service does not have a valid session count.",
+        500,
+      );
+    }
+
+    totalSessions =
+      sessionCount;
   }
 
   const bookingKey =
@@ -585,57 +1084,319 @@ export async function createAppointment(
       end,
     );
 
-  let appointment;
+  const activeBookingKey =
+    createActiveBookingKey(
+      input.clientId,
+    );
+
+  const session =
+    await mongoose.startSession();
+
+  let appointmentId: string | null =
+    null;
 
   try {
-    appointment =
-      await Appointment.create({
-        clientId:
-          input.clientId,
+    await session.withTransaction(
+      async () => {
+        const paymentServicePackage =
+          await ServicePackage.findOne({
+            paymentId:
+              input.paymentId,
+          }).session(session);
 
-        serviceId:
-          input.serviceId,
+        if (
+          paymentServicePackage
+        ) {
+          if (
+            paymentServicePackage.clientId.toString() !==
+              input.clientId ||
+            paymentServicePackage.serviceId.toString() !==
+              input.serviceId
+          ) {
+            throw new AppError(
+              "The payment is not associated with the requested service.",
+              409,
+            );
+          }
 
-        requestedDate:
-          input.requestedDate,
+          const existingAppointment =
+            await Appointment.findOne({
+              servicePackageId:
+                paymentServicePackage._id,
+              clientId:
+                input.clientId,
+              serviceId:
+                input.serviceId,
+            })
+              .session(session)
+              .sort({
+                createdAt: -1,
+              });
 
-        requestedTime:
-          input.requestedTime,
+          if (
+            existingAppointment
+          ) {
+            appointmentId =
+              existingAppointment._id.toString();
 
-        requestedStart:
-          start,
+            return;
+          }
 
-        requestedEnd:
-          end,
+          if (
+            paymentServicePackage.status !==
+            "active"
+          ) {
+            throw new AppError(
+              "The service package associated with this payment is not active.",
+              409,
+            );
+          }
 
-        sessionType:
-          input.sessionType,
+          if (
+            paymentServicePackage.remainingSessions <=
+            0
+          ) {
+            throw new AppError(
+              "The service package associated with this payment has no remaining sessions.",
+              409,
+            );
+          }
+        }
 
-        status: "pending",
+        const existingActiveAppointment =
+          await Appointment.findOne({
+            clientId:
+              input.clientId,
+            status: {
+              $in:
+                ACTIVE_APPOINTMENT_STATUSES,
+            },
+          })
+            .session(session)
+            .select("_id");
 
-        bookingKey,
-      });
+        if (
+          existingActiveAppointment
+        ) {
+          throw new AppError(
+            "You already have an active appointment and cannot book another session.",
+            409,
+          );
+        }
+
+        const conflict =
+          await checkScheduleConflict(
+            start,
+            end,
+            undefined,
+            session,
+          );
+
+        if (conflict) {
+          throw new AppError(
+            "The selected time is no longer available.",
+            409,
+          );
+        }
+
+        let servicePackage =
+          paymentServicePackage;
+
+        if (!servicePackage) {
+          servicePackage =
+            new ServicePackage({
+              clientId:
+                input.clientId,
+              serviceId:
+                input.serviceId,
+              paymentId:
+                input.paymentId,
+              totalSessions,
+              usedSessions: 0,
+              remainingSessions:
+                totalSessions,
+              status: "active",
+              purchasedAt:
+                new Date(),
+            });
+
+          await servicePackage.save({
+            session,
+          });
+        }
+
+        const createdAppointment =
+          new Appointment({
+            clientId:
+              input.clientId,
+            serviceId:
+              input.serviceId,
+            servicePackageId:
+              servicePackage._id,
+            requestedDate:
+              date,
+            requestedTime:
+              input.requestedTime,
+            requestedStart:
+              start,
+            requestedEnd:
+              end,
+            sessionType:
+              input.sessionType,
+            status: "pending",
+            bookingKey,
+            activeBookingKey,
+          });
+
+        await createdAppointment.save({
+          session,
+        });
+
+        appointmentId =
+          createdAppointment._id.toString();
+      },
+    );
   } catch (error: unknown) {
     if (
-      isDuplicateKeyError(
-        error,
-      )
+      isDuplicateKeyError(error)
     ) {
+      const duplicateFields =
+        getDuplicateKeyFields(
+          error,
+        );
+
+      if (
+        duplicateFields &&
+        "paymentId" in
+          duplicateFields
+      ) {
+        const duplicateServicePackage =
+          await ServicePackage.findOne({
+            paymentId:
+              input.paymentId,
+          });
+
+        if (
+          duplicateServicePackage &&
+          duplicateServicePackage.clientId.toString() ===
+            input.clientId &&
+          duplicateServicePackage.serviceId.toString() ===
+            input.serviceId
+        ) {
+          const existingAppointment =
+            await Appointment.findOne({
+              servicePackageId:
+                duplicateServicePackage._id,
+              clientId:
+                input.clientId,
+              serviceId:
+                input.serviceId,
+            })
+              .sort({
+                createdAt: -1,
+              });
+
+          if (
+            existingAppointment
+          ) {
+            appointmentId =
+              existingAppointment._id.toString();
+          }
+        }
+
+        if (appointmentId) {
+          return await (async () => {
+            await sendAppointmentNotificationSafely(
+              async () => undefined,
+            );
+
+            return Appointment.findById(
+              appointmentId!,
+            )
+              .populate("clientId")
+              .populate("serviceId")
+              .populate("servicePackageId");
+          })().then(
+            (appointment) => {
+              if (!appointment) {
+                throw new AppError(
+                  "Appointment not found after payment fulfilment.",
+                  500,
+                );
+              }
+
+              return appointment;
+            },
+          );
+        }
+
+        throw new AppError(
+          "The payment has already been associated with another fulfilment record.",
+          409,
+        );
+      }
+
+      if (
+        duplicateFields &&
+        "activeBookingKey" in
+          duplicateFields
+      ) {
+        throw new AppError(
+          "You already have an active appointment and cannot book another session.",
+          409,
+        );
+      }
+
+      if (
+        duplicateFields &&
+        "bookingKey" in
+          duplicateFields
+      ) {
+        throw new AppError(
+          "The selected time is no longer available.",
+          409,
+        );
+      }
+
       throw new AppError(
-        "The selected time is no longer available.",
+        "The appointment could not be created because a conflicting record already exists.",
         409,
       );
     }
 
     throw error;
+  } finally {
+    await session.endSession();
+  }
+
+  if (!appointmentId) {
+    throw new AppError(
+      "Unable to create the appointment from the successful payment.",
+      500,
+    );
   }
 
   await sendAppointmentNotificationSafely(
     () =>
       notifyAppointmentCreated(
-        appointment._id.toString(),
+        appointmentId!,
       ),
   );
+
+  const appointment =
+    await Appointment.findById(
+      appointmentId,
+    )
+      .populate("clientId")
+      .populate("serviceId")
+      .populate("servicePackageId");
+
+  if (!appointment) {
+    throw new AppError(
+      "Appointment not found after payment fulfilment.",
+      500,
+    );
+  }
 
   return appointment;
 }
@@ -649,14 +1410,14 @@ export async function createAppointment(
 export async function getClientAppointments(
   clientId: string,
 ) {
-  await validateClient(
-    clientId,
-  );
+  await validateClient(clientId);
 
   return Appointment.find({
     clientId,
   })
+    .populate("clientId")
     .populate("serviceId")
+    .populate("servicePackageId")
     .sort({
       createdAt: -1,
     });
@@ -666,9 +1427,7 @@ export async function getClientAppointmentById(
   appointmentId: string,
   clientId: string,
 ) {
-  await validateClient(
-    clientId,
-  );
+  await validateClient(clientId);
 
   const appointment =
     await Appointment.findOne({
@@ -676,7 +1435,8 @@ export async function getClientAppointmentById(
       clientId,
     })
       .populate("clientId")
-      .populate("serviceId");
+      .populate("serviceId")
+      .populate("servicePackageId");
 
   if (!appointment) {
     throw new AppError(
@@ -702,7 +1462,8 @@ export async function getAppointmentById(
       appointmentId,
     )
       .populate("clientId")
-      .populate("serviceId");
+      .populate("serviceId")
+      .populate("servicePackageId");
 
   if (!appointment) {
     throw new AppError(
@@ -718,6 +1479,7 @@ export async function getAllAppointments() {
   return Appointment.find()
     .populate("clientId")
     .populate("serviceId")
+    .populate("servicePackageId")
     .sort({
       createdAt: -1,
     });
@@ -769,58 +1531,104 @@ export async function acceptAppointment(
       service.durationMinutes,
     );
 
-  const conflict =
-    await checkScheduleConflict(
-      start,
-      end,
-      appointment.id,
-    );
-
-  if (conflict) {
-    throw new AppError(
-      "This appointment time is already occupied.",
-      409,
-    );
-  }
-
-  const bookingKey =
-    createBookingKey(
-      start,
-      end,
-    );
+  const session =
+    await mongoose.startSession();
 
   try {
-    appointment.scheduledStart =
-      start;
+    await session.withTransaction(
+      async () => {
+        const currentAppointment =
+          await Appointment.findOne({
+            _id:
+              input.appointmentId,
+            status: "pending",
+          }).session(session);
 
-    appointment.scheduledEnd =
-      end;
+        if (!currentAppointment) {
+          throw new AppError(
+            "Only pending appointments can be accepted.",
+            409,
+          );
+        }
 
-    appointment.bookingKey =
-      bookingKey;
+        const conflict =
+          await checkScheduleConflict(
+            start,
+            end,
+            input.appointmentId,
+            session,
+          );
 
-    appointment.status =
-      "accepted";
+        if (conflict) {
+          throw new AppError(
+            "This appointment time is already occupied.",
+            409,
+          );
+        }
 
-    appointment.acceptedAt =
-      new Date();
+        const bookingKey =
+          createBookingKey(
+            start,
+            end,
+          );
 
-    appointment.adminNote =
-      input.adminNote;
+        currentAppointment.scheduledStart =
+          start;
 
-    appointment.meetingLink =
-      input.meetingLink;
+        currentAppointment.scheduledEnd =
+          end;
 
-    appointment.location =
-      input.location;
+        currentAppointment.bookingKey =
+          bookingKey;
 
-    await appointment.save();
+        currentAppointment.activeBookingKey =
+          getActiveBookingKey(
+            currentAppointment,
+          );
+
+        currentAppointment.status =
+          "accepted";
+
+        currentAppointment.acceptedAt =
+          new Date();
+
+        currentAppointment.adminNote =
+          input.adminNote?.trim() ||
+          undefined;
+
+        currentAppointment.meetingLink =
+          input.meetingLink?.trim() ||
+          undefined;
+
+        currentAppointment.location =
+          input.location?.trim() ||
+          undefined;
+
+        await currentAppointment.save({
+          session,
+        });
+      },
+    );
   } catch (error: unknown) {
     if (
-      isDuplicateKeyError(
-        error,
-      )
+      isDuplicateKeyError(error)
     ) {
+      const duplicateFields =
+        getDuplicateKeyFields(
+          error,
+        );
+
+      if (
+        duplicateFields &&
+        "activeBookingKey" in
+          duplicateFields
+      ) {
+        throw new AppError(
+          "This client already has another active appointment.",
+          409,
+        );
+      }
+
       throw new AppError(
         "This appointment slot has already been taken.",
         409,
@@ -828,19 +1636,33 @@ export async function acceptAppointment(
     }
 
     throw error;
+  } finally {
+    await session.endSession();
+  }
+
+  const updatedAppointment =
+    await Appointment.findById(
+      input.appointmentId,
+    )
+      .populate("clientId")
+      .populate("serviceId")
+      .populate("servicePackageId");
+
+  if (!updatedAppointment) {
+    throw new AppError(
+      "Appointment not found after acceptance.",
+      500,
+    );
   }
 
   await sendAppointmentNotificationSafely(
     () =>
       notifyAppointmentAccepted(
-        appointment._id.toString(),
+        updatedAppointment._id.toString(),
       ),
   );
 
-  return appointment.populate([
-    "clientId",
-    "serviceId",
-  ]);
+  return updatedAppointment;
 }
 
 /*
@@ -853,22 +1675,35 @@ export async function rejectAppointment(
   appointmentId: string,
   reason: string,
 ) {
-  const appointment =
-    await Appointment.findById(
-      appointmentId,
-    );
+  const trimmedReason =
+    reason.trim();
 
-  if (!appointment) {
+  if (!trimmedReason) {
     throw new AppError(
-      "Appointment not found.",
-      404,
+      "A rejection reason is required.",
+      400,
     );
   }
 
-  if (
-    appointment.status !==
-    "pending"
-  ) {
+  const appointment =
+    await Appointment.findOne({
+      _id: appointmentId,
+      status: "pending",
+    });
+
+  if (!appointment) {
+    const existing =
+      await Appointment.findById(
+        appointmentId,
+      );
+
+    if (!existing) {
+      throw new AppError(
+        "Appointment not found.",
+        404,
+      );
+    }
+
     throw new AppError(
       "Only pending appointments can be rejected.",
       400,
@@ -879,10 +1714,11 @@ export async function rejectAppointment(
     "rejected";
 
   appointment.rejectionReason =
-    reason;
+    trimmedReason;
 
-  appointment.bookingKey =
-    undefined;
+  clearAppointmentSlot(
+    appointment,
+  );
 
   await appointment.save();
 
@@ -890,14 +1726,16 @@ export async function rejectAppointment(
     () =>
       notifyAppointmentRejected(
         appointment._id.toString(),
-        reason,
+        trimmedReason,
       ),
   );
 
-  return appointment.populate([
-    "clientId",
-    "serviceId",
-  ]);
+  return Appointment.findById(
+    appointment._id,
+  )
+    .populate("clientId")
+    .populate("serviceId")
+    .populate("servicePackageId");
 }
 
 /*
@@ -941,13 +1779,15 @@ export async function cancelAppointment(
     "cancelled";
 
   appointment.cancellationReason =
-    reason;
+    reason?.trim() ||
+    undefined;
 
   appointment.cancelledAt =
     new Date();
 
-  appointment.bookingKey =
-    undefined;
+  clearAppointmentSlot(
+    appointment,
+  );
 
   await appointment.save();
 
@@ -960,10 +1800,12 @@ export async function cancelAppointment(
       ),
   );
 
-  return appointment.populate([
-    "clientId",
-    "serviceId",
-  ]);
+  return Appointment.findById(
+    appointment._id,
+  )
+    .populate("clientId")
+    .populate("serviceId")
+    .populate("servicePackageId");
 }
 
 /*
@@ -977,9 +1819,7 @@ export async function cancelClientAppointment(
   clientId: string,
   reason?: string,
 ) {
-  await validateClient(
-    clientId,
-  );
+  await validateClient(clientId);
 
   const appointment =
     await Appointment.findOne({
@@ -1013,13 +1853,15 @@ export async function cancelClientAppointment(
     "cancelled";
 
   appointment.cancellationReason =
-    reason;
+    reason?.trim() ||
+    undefined;
 
   appointment.cancelledAt =
     new Date();
 
-  appointment.bookingKey =
-    undefined;
+  clearAppointmentSlot(
+    appointment,
+  );
 
   await appointment.save();
 
@@ -1032,10 +1874,12 @@ export async function cancelClientAppointment(
       ),
   );
 
-  return appointment.populate([
-    "clientId",
-    "serviceId",
-  ]);
+  return Appointment.findById(
+    appointment._id,
+  )
+    .populate("clientId")
+    .populate("serviceId")
+    .populate("servicePackageId");
 }
 
 /*
@@ -1079,6 +1923,7 @@ export async function rescheduleAppointment(
     );
 
   const {
+    date,
     start,
     end,
   } =
@@ -1088,58 +1933,106 @@ export async function rescheduleAppointment(
       service.durationMinutes,
     );
 
-  const conflict =
-    await checkScheduleConflict(
-      start,
-      end,
-      appointment.id,
-    );
-
-  if (conflict) {
-    throw new AppError(
-      "The selected time is already occupied.",
-      409,
-    );
-  }
-
-  const bookingKey =
-    createBookingKey(
-      start,
-      end,
-    );
+  const session =
+    await mongoose.startSession();
 
   try {
-    appointment.requestedDate =
-      input.requestedDate;
+    await session.withTransaction(
+      async () => {
+        const currentAppointment =
+          await Appointment.findOne({
+            _id:
+              input.appointmentId,
+            status: {
+              $in: [
+                "accepted",
+                "rescheduled",
+              ],
+            },
+          }).session(session);
 
-    appointment.requestedTime =
-      input.requestedTime;
+        if (!currentAppointment) {
+          throw new AppError(
+            "Only active appointments can be rescheduled.",
+            409,
+          );
+        }
 
-    appointment.requestedStart =
-      start;
+        const conflict =
+          await checkScheduleConflict(
+            start,
+            end,
+            input.appointmentId,
+            session,
+          );
 
-    appointment.requestedEnd =
-      end;
+        if (conflict) {
+          throw new AppError(
+            "The selected time is already occupied.",
+            409,
+          );
+        }
 
-    appointment.scheduledStart =
-      start;
+        const bookingKey =
+          createBookingKey(
+            start,
+            end,
+          );
 
-    appointment.scheduledEnd =
-      end;
+        currentAppointment.requestedDate =
+          date;
 
-    appointment.bookingKey =
-      bookingKey;
+        currentAppointment.requestedTime =
+          input.requestedTime;
 
-    appointment.status =
-      "rescheduled";
+        currentAppointment.requestedStart =
+          start;
 
-    await appointment.save();
+        currentAppointment.requestedEnd =
+          end;
+
+        currentAppointment.scheduledStart =
+          start;
+
+        currentAppointment.scheduledEnd =
+          end;
+
+        currentAppointment.bookingKey =
+          bookingKey;
+
+        currentAppointment.activeBookingKey =
+          getActiveBookingKey(
+            currentAppointment,
+          );
+
+        currentAppointment.status =
+          "rescheduled";
+
+        await currentAppointment.save({
+          session,
+        });
+      },
+    );
   } catch (error: unknown) {
     if (
-      isDuplicateKeyError(
-        error,
-      )
+      isDuplicateKeyError(error)
     ) {
+      const duplicateFields =
+        getDuplicateKeyFields(
+          error,
+        );
+
+      if (
+        duplicateFields &&
+        "activeBookingKey" in
+          duplicateFields
+      ) {
+        throw new AppError(
+          "This client already has another active appointment.",
+          409,
+        );
+      }
+
       throw new AppError(
         "The selected time is already occupied.",
         409,
@@ -1147,19 +2040,33 @@ export async function rescheduleAppointment(
     }
 
     throw error;
+  } finally {
+    await session.endSession();
+  }
+
+  const updatedAppointment =
+    await Appointment.findById(
+      input.appointmentId,
+    )
+      .populate("clientId")
+      .populate("serviceId")
+      .populate("servicePackageId");
+
+  if (!updatedAppointment) {
+    throw new AppError(
+      "Appointment not found after rescheduling.",
+      500,
+    );
   }
 
   await sendAppointmentNotificationSafely(
     () =>
       notifyAppointmentRescheduled(
-        appointment._id.toString(),
+        updatedAppointment._id.toString(),
       ),
   );
 
-  return appointment.populate([
-    "clientId",
-    "serviceId",
-  ]);
+  return updatedAppointment;
 }
 
 /*
@@ -1172,40 +2079,50 @@ export async function startAppointment(
   appointmentId: string,
 ) {
   const appointment =
-    await Appointment.findById(
-      appointmentId,
-    );
+    await Appointment.findOneAndUpdate(
+      {
+        _id: appointmentId,
+        status: {
+          $in: [
+            "accepted",
+            "rescheduled",
+          ],
+        },
+      },
+      {
+        $set: {
+          status: "ongoing",
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    )
+      .populate("clientId")
+      .populate("serviceId")
+      .populate("servicePackageId");
 
   if (!appointment) {
-    throw new AppError(
-      "Appointment not found.",
-      404,
-    );
-  }
+    const existing =
+      await Appointment.findById(
+        appointmentId,
+      );
 
-  if (
-    ![
-      "accepted",
-      "rescheduled",
-    ].includes(
-      appointment.status,
-    )
-  ) {
+    if (!existing) {
+      throw new AppError(
+        "Appointment not found.",
+        404,
+      );
+    }
+
     throw new AppError(
       "This appointment cannot be started.",
       400,
     );
   }
 
-  appointment.status =
-    "ongoing";
-
-  await appointment.save();
-
-  return appointment.populate([
-    "clientId",
-    "serviceId",
-  ]);
+  return appointment;
 }
 
 /*
@@ -1214,56 +2131,198 @@ export async function startAppointment(
 |--------------------------------------------------------------------------
 */
 
+async function consumeServicePackageSession(
+  appointment: AppointmentDocument,
+  session: ClientSession,
+): Promise<void> {
+  if (
+    !appointment.servicePackageId
+  ) {
+    throw new AppError(
+      "This appointment is not linked to a service package.",
+      409,
+    );
+  }
+
+  const now = new Date();
+
+  const servicePackage =
+    await ServicePackage.findOneAndUpdate(
+      {
+        _id:
+          appointment.servicePackageId,
+        clientId:
+          appointment.clientId,
+        serviceId:
+          appointment.serviceId,
+        status: "active",
+        remainingSessions: {
+          $gt: 0,
+        },
+        $or: [
+          {
+            expiresAt: {
+              $exists: false,
+            },
+          },
+          {
+            expiresAt: null,
+          },
+          {
+            expiresAt: {
+              $gt: now,
+            },
+          },
+        ],
+      },
+      [
+        {
+          $set: {
+            usedSessions: {
+              $add: [
+                "$usedSessions",
+                1,
+              ],
+            },
+            remainingSessions: {
+              $subtract: [
+                "$remainingSessions",
+                1,
+              ],
+            },
+            lastUsedAt: now,
+          },
+        },
+        {
+          $set: {
+            status: {
+              $cond: [
+                {
+                  $eq: [
+                    "$remainingSessions",
+                    0,
+                  ],
+                },
+                "completed",
+                "active",
+              ],
+            },
+          },
+        },
+      ],
+      {
+        new: true,
+        session,
+      },
+    );
+
+  if (!servicePackage) {
+    throw new AppError(
+      "The service package has no available session or has expired.",
+      409,
+    );
+  }
+}
+
 export async function completeAppointment(
   appointmentId: string,
 ) {
-  const appointment =
-    await Appointment.findById(
-      appointmentId,
-    );
+  const session =
+    await mongoose.startSession();
 
-  if (!appointment) {
-    throw new AppError(
-      "Appointment not found.",
-      404,
+  let completedAppointmentId:
+    | string
+    | null = null;
+
+  try {
+    await session.withTransaction(
+      async () => {
+        const currentAppointment =
+          await Appointment.findOne({
+            _id: appointmentId,
+            status: {
+              $in: [
+                "accepted",
+                "ongoing",
+                "rescheduled",
+              ],
+            },
+          }).session(session);
+
+        if (!currentAppointment) {
+          const existing =
+            await Appointment.findById(
+              appointmentId,
+            ).session(session);
+
+          if (!existing) {
+            throw new AppError(
+              "Appointment not found.",
+              404,
+            );
+          }
+
+          throw new AppError(
+            "This appointment cannot be completed.",
+            400,
+          );
+        }
+
+        await consumeServicePackageSession(
+          currentAppointment,
+          session,
+        );
+
+        currentAppointment.status =
+          "completed";
+
+        currentAppointment.completedAt =
+          new Date();
+
+        clearAppointmentSlot(
+          currentAppointment,
+        );
+
+        await currentAppointment.save({
+          session,
+        });
+
+        completedAppointmentId =
+          currentAppointment._id.toString();
+      },
     );
+  } finally {
+    await session.endSession();
   }
 
-  if (
-    ![
-      "accepted",
-      "ongoing",
-      "rescheduled",
-    ].includes(
-      appointment.status,
-    )
-  ) {
+  if (!completedAppointmentId) {
     throw new AppError(
-      "This appointment cannot be completed.",
-      400,
+      "Unable to complete the appointment.",
+      500,
     );
   }
-
-  appointment.status =
-    "completed";
-
-  appointment.completedAt =
-    new Date();
-
-  appointment.bookingKey =
-    undefined;
-
-  await appointment.save();
 
   await sendAppointmentNotificationSafely(
     () =>
       notifyAppointmentCompleted(
-        appointment._id.toString(),
+        completedAppointmentId!,
       ),
   );
 
-  return appointment.populate([
-    "clientId",
-    "serviceId",
-  ]);
+  const appointment =
+    await Appointment.findById(
+      completedAppointmentId,
+    )
+      .populate("clientId")
+      .populate("serviceId")
+      .populate("servicePackageId");
+
+  if (!appointment) {
+    throw new AppError(
+      "Appointment not found after completion.",
+      500,
+    );
+  }
+
+  return appointment;
 }

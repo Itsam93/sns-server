@@ -17,6 +17,10 @@ type CreateWorkshopParticipantInput = {
   organisationName?: string;
 };
 
+type RegisterParticipantOptions = {
+  allowPostPaymentFulfilment?: boolean;
+};
+
 const ACTIVE_PARTICIPANT_STATUSES: WorkshopParticipantStatus[] = [
   "registered",
   "attended",
@@ -25,7 +29,7 @@ const ACTIVE_PARTICIPANT_STATUSES: WorkshopParticipantStatus[] = [
 function validateObjectId(
   id: string,
   fieldName: string,
-) {
+): void {
   if (!mongoose.isValidObjectId(id)) {
     throw new AppError(
       `Invalid ${fieldName}.`,
@@ -43,9 +47,7 @@ async function getWorkshopOrFail(
   );
 
   const workshop =
-    await Workshop.findById(
-      workshopId,
-    );
+    await Workshop.findById(workshopId);
 
   if (!workshop) {
     throw new AppError(
@@ -82,30 +84,24 @@ async function getParticipantOrFail(
 
 function validateRegistrationEligibility(
   workshop: IWorkshop,
-) {
-  if (
-    workshop.status !==
-    "published"
-  ) {
+): void {
+  if (workshop.status !== "published") {
     throw new AppError(
       "Registration is not available for this workshop.",
       409,
     );
   }
 
-  if (
-    !workshop.registrationRequired
-  ) {
+  if (!workshop.registrationRequired) {
     throw new AppError(
       "Registration is not required for this workshop.",
       409,
     );
   }
 
-  if (
-    workshop.startDate <=
-    new Date()
-  ) {
+  const now = new Date();
+
+  if (workshop.startDate <= now) {
     throw new AppError(
       "Registration is closed because the workshop has already started.",
       409,
@@ -114,8 +110,7 @@ function validateRegistrationEligibility(
 
   if (
     workshop.registrationDeadline &&
-    workshop.registrationDeadline <
-      new Date()
+    workshop.registrationDeadline < now
   ) {
     throw new AppError(
       "Registration for this workshop has closed.",
@@ -124,125 +119,193 @@ function validateRegistrationEligibility(
   }
 }
 
-async function getActiveParticipantCount(
-  workshopId: mongoose.Types.ObjectId,
-) {
-  return WorkshopParticipant.countDocuments(
-    {
-      workshopId,
-      status: {
-        $in: [
-          ...ACTIVE_PARTICIPANT_STATUSES,
-        ],
-      },
-    },
+function normalizeParticipantEmail(
+  email: string,
+): string {
+  const normalized = email
+    .trim()
+    .toLowerCase();
+
+  if (
+    !normalized ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      normalized,
+    )
+  ) {
+    throw new AppError(
+      "A valid email address is required.",
+      400,
+    );
+  }
+
+  return normalized;
+}
+
+function normalizeParticipantName(
+  fullName: string,
+): string {
+  const normalized = fullName.trim();
+
+  if (!normalized) {
+    throw new AppError(
+      "Full name is required.",
+      400,
+    );
+  }
+
+  return normalized;
+}
+
+function normalizeOptionalParticipantString(
+  value: string | undefined,
+): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+
+  return normalized || undefined;
+}
+
+function isDuplicateKeyError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof mongoose.Error &&
+    "code" in error &&
+    error.code === 11000
   );
 }
 
-export async function registerParticipant(
-  workshopId: string,
-  data: CreateWorkshopParticipantInput,
-) {
-  const workshop =
-    await getWorkshopOrFail(
-      workshopId,
+async function getActiveParticipantCount(
+  workshopId: mongoose.Types.ObjectId,
+): Promise<number> {
+  return WorkshopParticipant.countDocuments({
+    workshopId,
+    status: {
+      $in: ACTIVE_PARTICIPANT_STATUSES,
+    },
+  });
+}
+
+async function ensureWorkshopHasCapacity(
+  workshop: IWorkshop,
+): Promise<void> {
+  if (workshop.capacity === undefined) {
+    return;
+  }
+
+  const participantCount =
+    await getActiveParticipantCount(
+      workshop._id,
     );
 
-  validateRegistrationEligibility(
-    workshop,
-  );
-
-  const email =
-    data.email.toLowerCase();
-
-  const existingParticipant =
-    await WorkshopParticipant.findOne(
-      {
-        workshopId:
-          workshop._id,
-        email,
-      },
-    );
-
-  if (existingParticipant) {
-    if (
-      existingParticipant.status ===
-      "cancelled"
-    ) {
-      existingParticipant.status =
-        "registered";
-
-      existingParticipant.cancelledAt =
-        undefined;
-
-      existingParticipant.registeredAt =
-        new Date();
-
-      existingParticipant.fullName =
-        data.fullName;
-
-      existingParticipant.phone =
-        data.phone;
-
-      existingParticipant.organisationName =
-        data.organisationName;
-
-      await existingParticipant.save();
-
-      return existingParticipant;
-    }
-
+  if (
+    participantCount >=
+    workshop.capacity
+  ) {
     throw new AppError(
-      "This email is already registered for the workshop.",
+      "This workshop has reached its registration capacity.",
       409,
     );
   }
+}
 
-  if (
-    workshop.capacity !==
-    undefined
-  ) {
-    const participantCount =
-      await getActiveParticipantCount(
-        workshop._id,
-      );
+async function restoreCancelledParticipant(
+  participant: Awaited<
+    ReturnType<
+      typeof getParticipantOrFail
+    >
+  >,
+  workshop: IWorkshop,
+  data: CreateWorkshopParticipantInput,
+): Promise<typeof participant> {
+  await ensureWorkshopHasCapacity(
+    workshop,
+  );
 
-    if (
-      participantCount >=
-      workshop.capacity
-    ) {
+  participant.status = "registered";
+
+  participant.cancelledAt =
+    undefined;
+
+  participant.attendedAt =
+    undefined;
+
+  participant.noShowAt =
+    undefined;
+
+  participant.registeredAt =
+    new Date();
+
+  participant.fullName =
+    normalizeParticipantName(
+      data.fullName,
+    );
+
+  participant.email =
+    normalizeParticipantEmail(
+      data.email,
+    );
+
+  participant.phone =
+    normalizeOptionalParticipantString(
+      data.phone,
+    );
+
+  participant.organisationName =
+    normalizeOptionalParticipantString(
+      data.organisationName,
+    );
+
+  try {
+    await participant.save();
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
       throw new AppError(
-        "This workshop has reached its registration capacity.",
+        "This email is already registered for the workshop.",
         409,
       );
     }
+
+    throw error;
   }
 
+  return participant;
+}
+
+async function registerNewParticipant(
+  workshop: IWorkshop,
+  data: CreateWorkshopParticipantInput,
+  email: string,
+) {
+  await ensureWorkshopHasCapacity(
+    workshop,
+  );
+
   try {
-    return await WorkshopParticipant.create(
-      {
-        workshopId:
-          workshop._id,
-        fullName:
+    return await WorkshopParticipant.create({
+      workshopId:
+        workshop._id,
+      fullName:
+        normalizeParticipantName(
           data.fullName,
-        email,
-        phone:
+        ),
+      email,
+      phone:
+        normalizeOptionalParticipantString(
           data.phone,
-        organisationName:
+        ),
+      organisationName:
+        normalizeOptionalParticipantString(
           data.organisationName,
-        status:
-          "registered",
-        registeredAt:
-          new Date(),
-      },
-    );
+        ),
+      status: "registered",
+      registeredAt: new Date(),
+    });
   } catch (error) {
-    if (
-      error instanceof
-        mongoose.Error &&
-      "code" in error &&
-      error.code === 11000
-    ) {
+    if (isDuplicateKeyError(error)) {
       throw new AppError(
         "This email is already registered for the workshop.",
         409,
@@ -253,6 +316,69 @@ export async function registerParticipant(
   }
 }
 
+export async function registerParticipant(
+  workshopId: string,
+  data: CreateWorkshopParticipantInput,
+  options: RegisterParticipantOptions = {},
+) {
+  const workshop =
+    await getWorkshopOrFail(
+      workshopId,
+    );
+
+  const email =
+    normalizeParticipantEmail(
+      data.email,
+    );
+
+  const allowPostPaymentFulfilment =
+    options.allowPostPaymentFulfilment ===
+    true;
+
+  if (!allowPostPaymentFulfilment) {
+    validateRegistrationEligibility(
+      workshop,
+    );
+  }
+
+  const existingParticipant =
+    await WorkshopParticipant.findOne({
+      workshopId:
+        workshop._id,
+      email,
+    });
+
+  if (existingParticipant) {
+    if (
+      existingParticipant.status ===
+      "cancelled"
+    ) {
+      return restoreCancelledParticipant(
+        existingParticipant,
+        workshop,
+        {
+          ...data,
+          email,
+        },
+      );
+    }
+
+    throw new AppError(
+      "This email is already registered for the workshop.",
+      409,
+    );
+  }
+
+  return registerNewParticipant(
+    workshop,
+    {
+      ...data,
+      email,
+    },
+    email,
+  );
+}
+
 export async function getWorkshopParticipants(
   workshopId: string,
 ) {
@@ -261,12 +387,10 @@ export async function getWorkshopParticipants(
       workshopId,
     );
 
-  return WorkshopParticipant.find(
-    {
-      workshopId:
-        workshop._id,
-    },
-  ).sort({
+  return WorkshopParticipant.find({
+    workshopId:
+      workshop._id,
+  }).sort({
     registeredAt: -1,
   });
 }
@@ -310,42 +434,69 @@ export async function updateParticipantStatus(
     );
   }
 
-  if (
-    status === "attended"
-  ) {
+  if (status === "registered") {
+    const workshop =
+      await getWorkshopOrFail(
+        participant.workshopId.toString(),
+      );
+
+    if (
+      participant.status !==
+      "registered"
+    ) {
+      await ensureWorkshopHasCapacity(
+        workshop,
+      );
+    }
+
+    participant.registeredAt =
+      new Date();
+
+    participant.attendedAt =
+      undefined;
+
+    participant.cancelledAt =
+      undefined;
+
+    participant.noShowAt =
+      undefined;
+  }
+
+  if (status === "attended") {
     participant.attendedAt =
       participant.attendedAt ??
       new Date();
 
     participant.cancelledAt =
       undefined;
+
+    participant.noShowAt =
+      undefined;
   }
 
-  if (
-    status === "cancelled"
-  ) {
+  if (status === "cancelled") {
     participant.cancelledAt =
       new Date();
 
     participant.attendedAt =
       undefined;
+
+    participant.noShowAt =
+      undefined;
   }
 
-  if (
-    status === "registered"
-  ) {
-    participant.registeredAt =
+  if (status === "no_show") {
+    participant.noShowAt =
       new Date();
-
-    participant.cancelledAt =
-      undefined;
 
     participant.attendedAt =
       undefined;
+
+    participant.cancelledAt =
+      undefined;
   }
 
-  participant.status =
-    status;
+  participant.status = status;
 
   await participant.save();
 
@@ -392,48 +543,30 @@ export async function getWorkshopParticipantCount(
     cancelled,
     noShow,
   ] = await Promise.all([
-    WorkshopParticipant.countDocuments(
-      {
-        workshopId:
-          workshop._id,
-      },
-    ),
-
-    WorkshopParticipant.countDocuments(
-      {
-        workshopId:
-          workshop._id,
-        status:
-          "registered",
-      },
-    ),
-
-    WorkshopParticipant.countDocuments(
-      {
-        workshopId:
-          workshop._id,
-        status:
-          "attended",
-      },
-    ),
-
-    WorkshopParticipant.countDocuments(
-      {
-        workshopId:
-          workshop._id,
-        status:
-          "cancelled",
-      },
-    ),
-
-    WorkshopParticipant.countDocuments(
-      {
-        workshopId:
-          workshop._id,
-        status:
-          "no_show",
-      },
-    ),
+    WorkshopParticipant.countDocuments({
+      workshopId:
+        workshop._id,
+    }),
+    WorkshopParticipant.countDocuments({
+      workshopId:
+        workshop._id,
+      status: "registered",
+    }),
+    WorkshopParticipant.countDocuments({
+      workshopId:
+        workshop._id,
+      status: "attended",
+    }),
+    WorkshopParticipant.countDocuments({
+      workshopId:
+        workshop._id,
+      status: "cancelled",
+    }),
+    WorkshopParticipant.countDocuments({
+      workshopId:
+        workshop._id,
+      status: "no_show",
+    }),
   ]);
 
   return {

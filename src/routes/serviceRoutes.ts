@@ -12,12 +12,10 @@ import {
   update,
   updateStatus,
 } from "../controllers/serviceController.js";
-
 import { requireAuth } from "../middleware/authMiddleware.js";
 import { requireRole } from "../middleware/roleMiddleware.js";
 import { validate } from "../middleware/validateMiddleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-
 import {
   createServiceSchema,
   serviceIdSchema,
@@ -27,10 +25,6 @@ import {
 } from "../utils/serviceValidation.js";
 
 const router = Router();
-
-/*
- * Public service routes
- */
 
 router.get(
   "/active",
@@ -45,10 +39,6 @@ router.get(
   ),
   asyncHandler(getBySlug),
 );
-
-/*
- * Admin service management
- */
 
 router.use(
   requireAuth,

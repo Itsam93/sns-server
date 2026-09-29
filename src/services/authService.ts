@@ -659,5 +659,15 @@ export async function getAuthenticatedUser(
     );
   }
 
-  return user;
+  const client =
+    user.role === "client"
+      ? await Client.findOne({
+          userId: user._id,
+        })
+      : null;
+
+  return {
+    user,
+    client,
+  };
 }

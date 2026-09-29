@@ -24,6 +24,7 @@ export interface IWorkshopParticipant
   registeredAt: Date;
   attendedAt?: Date;
   cancelledAt?: Date;
+  noShowAt?: Date;
 
   createdAt: Date;
   updatedAt: Date;
@@ -98,11 +99,82 @@ const workshopParticipantSchema =
       cancelledAt: {
         type: Date,
       },
+
+      noShowAt: {
+        type: Date,
+      },
     },
     {
       timestamps: true,
+      strict: true,
+      strictQuery: true,
     },
   );
+
+workshopParticipantSchema.pre(
+  "validate",
+  function () {
+    if (
+      this.status === "attended" &&
+      !this.attendedAt
+    ) {
+      this.invalidate(
+        "attendedAt",
+        "Attended participants must have an attendance timestamp.",
+      );
+    }
+
+    if (
+      this.status === "cancelled" &&
+      !this.cancelledAt
+    ) {
+      this.invalidate(
+        "cancelledAt",
+        "Cancelled participants must have a cancellation timestamp.",
+      );
+    }
+
+    if (
+      this.status === "no_show" &&
+      !this.noShowAt
+    ) {
+      this.invalidate(
+        "noShowAt",
+        "No-show participants must have a no-show timestamp.",
+      );
+    }
+
+    if (
+      this.status !== "attended" &&
+      this.attendedAt
+    ) {
+      this.invalidate(
+        "attendedAt",
+        "Only attended participants can have an attendance timestamp.",
+      );
+    }
+
+    if (
+      this.status !== "cancelled" &&
+      this.cancelledAt
+    ) {
+      this.invalidate(
+        "cancelledAt",
+        "Only cancelled participants can have a cancellation timestamp.",
+      );
+    }
+
+    if (
+      this.status !== "no_show" &&
+      this.noShowAt
+    ) {
+      this.invalidate(
+        "noShowAt",
+        "Only no-show participants can have a no-show timestamp.",
+      );
+    }
+  },
+);
 
 workshopParticipantSchema.index(
   {
@@ -111,18 +183,23 @@ workshopParticipantSchema.index(
   },
   {
     unique: true,
+    name: "unique_workshop_participant_email",
   },
 );
 
-workshopParticipantSchema.index({
-  workshopId: 1,
-  status: 1,
-});
+workshopParticipantSchema.index(
+  {
+    workshopId: 1,
+    status: 1,
+  },
+);
 
-workshopParticipantSchema.index({
-  email: 1,
-  createdAt: -1,
-});
+workshopParticipantSchema.index(
+  {
+    email: 1,
+    createdAt: -1,
+  },
+);
 
 export const WorkshopParticipant =
   mongoose.model<IWorkshopParticipant>(

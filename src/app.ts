@@ -102,9 +102,15 @@ app.use(
 const globalRateLimiter =
   rateLimit({
     windowMs: 15 * 60 * 1000,
-    limit: 150,
+    limit: isProduction ? 150 : 1000,
     standardHeaders: "draft-7",
     legacyHeaders: false,
+    skip(req) {
+      return (
+        req.path ===
+        "/api/payments/webhooks/korapay"
+      );
+    },
     message: {
       success: false,
       message:
