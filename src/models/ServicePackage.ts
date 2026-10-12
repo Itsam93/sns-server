@@ -13,6 +13,7 @@ export interface IServicePackage
   extends Document {
   clientId: mongoose.Types.ObjectId;
   serviceId: mongoose.Types.ObjectId;
+  paymentId?: mongoose.Types.ObjectId;
 
   totalSessions: number;
   usedSessions: number;
@@ -48,6 +49,12 @@ const servicePackageSchema =
           true,
           "Service is required.",
         ],
+        index: true,
+      },
+
+      paymentId: {
+        type: Schema.Types.ObjectId,
+        ref: "Payment",
         index: true,
       },
 
@@ -211,6 +218,10 @@ servicePackageSchema.index({
 servicePackageSchema.index({
   status: 1,
   expiresAt: 1,
+});
+
+servicePackageSchema.index({
+  paymentId: 1,
 });
 
 export const ServicePackage =

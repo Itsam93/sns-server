@@ -174,14 +174,19 @@ const ticketPricingSchema =
 
       USD:
         ticketPriceSchema.optional(),
+
+      GBP:
+        ticketPriceSchema.optional(),
     })
     .refine(
       ({
         NGN,
         USD,
+        GBP,
       }) =>
         NGN !== undefined ||
-        USD !== undefined,
+        USD !== undefined ||
+        GBP !== undefined,
       {
         message:
           "At least one ticket price is required.",
@@ -381,7 +386,7 @@ const validateWorkshopDates =
           "endTime",
         ],
         message:
-          "End time must be later than start time.",
+          "End time must be later than the start time.",
       });
     }
 

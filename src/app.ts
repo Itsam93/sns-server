@@ -25,8 +25,7 @@ if (!clientUrl) {
 let allowedOrigin: string;
 
 try {
-  allowedOrigin =
-    new URL(clientUrl).origin;
+  allowedOrigin = new URL(clientUrl).origin;
 } catch {
   throw new Error(
     "CLIENT_URL must be a valid URL",
@@ -75,9 +74,7 @@ app.use(
       }
 
       callback(
-        new Error(
-          "CORS origin not allowed",
-        ),
+        new Error("CORS origin not allowed"),
       );
     },
     credentials: true,
@@ -99,24 +96,23 @@ app.use(
   }),
 );
 
-const globalRateLimiter =
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: isProduction ? 150 : 1000,
-    standardHeaders: "draft-7",
-    legacyHeaders: false,
-    skip(req) {
-      return (
-        req.path ===
-        "/api/payments/webhooks/korapay"
-      );
-    },
-    message: {
-      success: false,
-      message:
-        "Too many requests. Please try again later.",
-    },
-  });
+const globalRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isProduction ? 150 : 1000,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  skip(req) {
+    return (
+      req.path === "/api/auth/me" ||
+      req.path === "/api/payments/webhooks/korapay"
+    );
+  },
+  message: {
+    success: false,
+    message:
+      "Too many requests. Please try again later.",
+  },
+});
 
 app.use(globalRateLimiter);
 
@@ -135,16 +131,24 @@ app.use(
 
 app.use(cookieParser());
 
-app.get(
-  "/api/health",
-  (_req, res) => {
-    res.status(200).json({
-      success: true,
-      message:
-        "SnS API is running",
-    });
-  },
-);
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "SnS API is running",
+  });
+});
+
+app.use((req, _res, next) => {
+  if (req.originalUrl.includes("/payments/")) {
+    console.log(
+      "[Payment request]",
+      req.method,
+      req.originalUrl,
+    );
+  }
+
+  next();
+});
 
 app.use("/api", routes);
 

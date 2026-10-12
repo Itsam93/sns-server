@@ -8,6 +8,7 @@ import {
 
 import {
   Workshop,
+  type IWorkshop,
   type WorkshopStatus,
   type WorkshopType,
 } from "../models/Workshop.js";
@@ -50,6 +51,40 @@ type CreateWorkshopInput = {
 
 type UpdateWorkshopInput =
   Partial<CreateWorkshopInput>;
+
+type SerializedWorkshopTicket = {
+  code: string;
+  name: string;
+  description?: string;
+  attendeeCount: number;
+  pricing: WorkshopTicketPricingInput;
+  isActive: boolean;
+};
+
+type SerializedWorkshop = {
+  _id: string;
+  title: string;
+  slug: string;
+  type: WorkshopType;
+  description: string;
+  shortDescription?: string;
+  startDate: Date;
+  endDate?: Date;
+  startTime?: string;
+  endTime?: string;
+  location?: string;
+  isOnline: boolean;
+  meetingLink?: string;
+  capacity?: number;
+  reservedCapacity: number;
+  registrationRequired: boolean;
+  registrationDeadline?: Date;
+  ticketTypes: SerializedWorkshopTicket[];
+  status: WorkshopStatus;
+  featuredImage?: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 const WORKSHOP_STATUSES:
   readonly WorkshopStatus[] = [
@@ -501,6 +536,127 @@ function toWorkshopTicketDocuments(
   );
 }
 
+function serializeTicket(
+  ticket: IWorkshop["ticketTypes"][number],
+): SerializedWorkshopTicket {
+  const pricing:
+    WorkshopTicketPricingInput =
+    {};
+
+  for (
+    const currency of
+      SUPPORTED_CURRENCIES
+  ) {
+    const amount =
+      ticket.pricing.get(
+        currency,
+      );
+
+    if (!amount) {
+      continue;
+    }
+
+    pricing[currency] =
+      Number(
+        amount.toString(),
+      );
+  }
+
+  return {
+    code: ticket.code,
+    name: ticket.name,
+    description:
+      ticket.description,
+    attendeeCount:
+      ticket.attendeeCount,
+    pricing,
+    isActive:
+      ticket.isActive,
+  };
+}
+
+function serializeWorkshop(
+  workshop: IWorkshop,
+): SerializedWorkshop {
+  return {
+    _id:
+      workshop._id.toString(),
+
+    title:
+      workshop.title,
+
+    slug:
+      workshop.slug,
+
+    type:
+      workshop.type,
+
+    description:
+      workshop.description,
+
+    shortDescription:
+      workshop.shortDescription,
+
+    startDate:
+      workshop.startDate,
+
+    endDate:
+      workshop.endDate,
+
+    startTime:
+      workshop.startTime,
+
+    endTime:
+      workshop.endTime,
+
+    location:
+      workshop.location,
+
+    isOnline:
+      workshop.isOnline,
+
+    meetingLink:
+      workshop.meetingLink,
+
+    capacity:
+      workshop.capacity,
+
+    reservedCapacity:
+      workshop.reservedCapacity,
+
+    registrationRequired:
+      workshop.registrationRequired,
+
+    registrationDeadline:
+      workshop.registrationDeadline,
+
+    ticketTypes:
+      workshop.ticketTypes.map(
+        serializeTicket,
+      ),
+
+    status:
+      workshop.status,
+
+    featuredImage:
+      workshop.featuredImage,
+
+    createdAt:
+      workshop.createdAt,
+
+    updatedAt:
+      workshop.updatedAt,
+  };
+}
+
+function serializeWorkshops(
+  workshops: IWorkshop[],
+): SerializedWorkshop[] {
+  return workshops.map(
+    serializeWorkshop,
+  );
+}
+
 function validatePublishedWorkshop(
   status:
     | WorkshopStatus
@@ -665,57 +821,62 @@ export async function createWorkshop(
   );
 
   try {
-    return await Workshop.create({
-      title,
-      slug,
-      type: data.type,
-      description,
+    const workshop =
+      await Workshop.create({
+        title,
+        slug,
+        type: data.type,
+        description,
 
-      shortDescription:
-        data.shortDescription?.trim(),
+        shortDescription:
+          data.shortDescription?.trim(),
 
-      startDate:
-        data.startDate,
+        startDate:
+          data.startDate,
 
-      endDate:
-        data.endDate,
+        endDate:
+          data.endDate,
 
-      startTime:
-        data.startTime,
+        startTime:
+          data.startTime,
 
-      endTime:
-        data.endTime,
+        endTime:
+          data.endTime,
 
-      location:
-        data.location?.trim(),
+        location:
+          data.location?.trim(),
 
-      isOnline:
-        data.isOnline,
+        isOnline:
+          data.isOnline,
 
-      meetingLink:
-        data.meetingLink?.trim(),
+        meetingLink:
+          data.meetingLink?.trim(),
 
-      capacity:
-        data.capacity,
+        capacity:
+          data.capacity,
 
-      reservedCapacity,
+        reservedCapacity,
 
-      registrationRequired:
-        data.registrationRequired,
+        registrationRequired:
+          data.registrationRequired,
 
-      registrationDeadline:
-        data.registrationDeadline,
+        registrationDeadline:
+          data.registrationDeadline,
 
-      ticketTypes:
-        toWorkshopTicketDocuments(
-          data.ticketTypes,
-        ),
+        ticketTypes:
+          toWorkshopTicketDocuments(
+            data.ticketTypes,
+          ),
 
-      status,
+        status,
 
-      featuredImage:
-        data.featuredImage?.trim(),
-    });
+        featuredImage:
+          data.featuredImage?.trim(),
+      });
+
+    return serializeWorkshop(
+      workshop,
+    );
   } catch (error) {
     return handleWorkshopError(
       error,
@@ -724,37 +885,57 @@ export async function createWorkshop(
 }
 
 export async function getPublishedWorkshops() {
-  return Workshop.find({
-    status: "published",
-  }).sort({
-    startDate: 1,
-  });
+  const workshops =
+    await Workshop.find({
+      status: "published",
+    }).sort({
+      startDate: 1,
+    });
+
+  return serializeWorkshops(
+    workshops,
+  );
 }
 
 export async function getUpcomingWorkshops() {
-  return Workshop.find({
-    status: "published",
-    startDate: {
-      $gte: new Date(),
-    },
-  }).sort({
-    startDate: 1,
-  });
+  const workshops =
+    await Workshop.find({
+      status: "published",
+      startDate: {
+        $gte: new Date(),
+      },
+    }).sort({
+      startDate: 1,
+    });
+
+  return serializeWorkshops(
+    workshops,
+  );
 }
 
 export async function getActiveWorkshops() {
-  return Workshop.find({
-    status: "published",
-  }).sort({
-    startDate: 1,
-  });
+  const workshops =
+    await Workshop.find({
+      status: "published",
+    }).sort({
+      startDate: 1,
+    });
+
+  return serializeWorkshops(
+    workshops,
+  );
 }
 
 export async function getWorkshopById(
   workshopId: string,
 ) {
-  return getWorkshopOrFail(
-    workshopId,
+  const workshop =
+    await getWorkshopOrFail(
+      workshopId,
+    );
+
+  return serializeWorkshop(
+    workshop,
   );
 }
 
@@ -778,14 +959,21 @@ export async function getWorkshopBySlug(
     );
   }
 
-  return workshop;
+  return serializeWorkshop(
+    workshop,
+  );
 }
 
 export async function getAllWorkshops() {
-  return Workshop.find()
-    .sort({
-      startDate: -1,
-    });
+  const workshops =
+    await Workshop.find()
+      .sort({
+        startDate: -1,
+      });
+
+  return serializeWorkshops(
+    workshops,
+  );
 }
 
 export async function updateWorkshop(
@@ -1015,13 +1203,15 @@ export async function updateWorkshop(
 
   try {
     await workshop.save();
+
+    return serializeWorkshop(
+      workshop,
+    );
   } catch (error) {
     return handleWorkshopError(
       error,
     );
   }
-
-  return workshop;
 }
 
 export async function updateWorkshopStatus(
@@ -1085,13 +1275,15 @@ export async function updateWorkshopStatus(
 
   try {
     await workshop.save();
+
+    return serializeWorkshop(
+      workshop,
+    );
   } catch (error) {
     return handleWorkshopError(
       error,
     );
   }
-
-  return workshop;
 }
 
 export async function publishWorkshop(
@@ -1126,13 +1318,15 @@ export async function completeWorkshop(
 
   try {
     await workshop.save();
+
+    return serializeWorkshop(
+      workshop,
+    );
   } catch (error) {
     return handleWorkshopError(
       error,
     );
   }
-
-  return workshop;
 }
 
 export async function cancelWorkshop(
@@ -1160,13 +1354,15 @@ export async function cancelWorkshop(
 
   try {
     await workshop.save();
+
+    return serializeWorkshop(
+      workshop,
+    );
   } catch (error) {
     return handleWorkshopError(
       error,
     );
   }
-
-  return workshop;
 }
 
 export async function getAvailableCapacity(

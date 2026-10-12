@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 import {
@@ -6,7 +7,10 @@ import {
 } from "../config/currencies.js";
 
 import { Client } from "../models/Client.js";
-import { Payment } from "../models/Payment.js";
+import {
+  Payment,
+  type IPayment,
+} from "../models/Payment.js";
 import { Programme } from "../models/Programme.js";
 import { Service } from "../models/Service.js";
 import { User } from "../models/User.js";
@@ -24,7 +28,6 @@ import type {
 import { generatePaymentReference } from "../utils/paymentReference.js";
 
 import type { PaymentProvider } from "../providers/PaymentProvider.js";
-import { KoraRateLimitError } from "../providers/koraProvider.js";
 import { createPaymentProvider } from "../providers/paymentProviderFactory.js";
 
 import {
@@ -34,8 +37,15 @@ import {
 
 import { paymentFulfilmentService } from "./paymentFulfilmentService.js";
 
-const PAYMENT_REDIRECT_PATH =
-  "/portal/payments/callback";
+import {
+  assertNoBlockingWorkshopReservation,
+  createWorkshopReservation,
+  releaseWorkshopReservation,
+} from "./workshopReservationService.js";
+
+const PAYMENT_REDIRECT_PATH = "/portal/payments/callback";
+
+const WORKSHOP_RESERVATION_MINUTES = 30;
 
 const PAYMENT_STATUSES = [
   "pending",
@@ -55,11 +65,22 @@ type ChargeVerificationStatus =
   | "cancelled"
   | "expired";
 
-function normalizeCurrency(
-  currency: string,
-): Currency {
-  const normalized =
-    currency.trim().toUpperCase();
+interface WorkshopPaymentMetadata {
+  registrationFullName?: string;
+  registrationEmail?: string;
+  registrationPhone?: string;
+  registrationOrganisationName?: string;
+}
+
+interface ValidatedWorkshopPaymentMetadata {
+  registrationFullName: string;
+  registrationEmail: string;
+  registrationPhone?: string;
+  registrationOrganisationName?: string;
+}
+
+function normalizeCurrency(currency: string): Currency {
+  const normalized = currency.trim().toUpperCase();
 
   if (!isSupportedCurrency(normalized)) {
     throw new Error(
@@ -71,8 +92,7 @@ function normalizeCurrency(
 }
 
 function getPaymentRedirectUrl(): string {
-  const clientUrl =
-    process.env.CLIENT_URL?.trim();
+  const clientUrl = process.env.CLIENT_URL?.trim();
 
   if (!clientUrl) {
     throw new Error(
@@ -84,10 +104,7 @@ function getPaymentRedirectUrl(): string {
 }
 
 function getDecimalParts(
-  value:
-    | mongoose.Types.Decimal128
-    | string
-    | number,
+  value: mongoose.Types.Decimal128 | string | number,
 ): {
   sign: 1 | -1;
   coefficient: bigint;
@@ -98,48 +115,27 @@ function getDecimalParts(
       ? value.toString()
       : String(value);
 
-  const normalized =
-    rawValue.trim();
+  const normalized = rawValue.trim();
 
-  const match =
-    normalized.match(
-      /^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/,
-    );
+  const match = normalized.match(
+    /^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/,
+  );
 
   if (!match) {
-    throw new Error(
-      `Invalid decimal value: ${rawValue}.`,
-    );
+    throw new Error(`Invalid decimal value: ${rawValue}.`);
   }
 
-  const sign =
-    match[1] === "-"
-      ? -1
-      : 1;
-
-  const integerPart =
-    match[2];
-
-  const fractionalPart =
-    match[3] ?? "";
-
-  const exponent =
-    Number(match[4] ?? "0");
+  const sign = match[1] === "-" ? -1 : 1;
+  const integerPart = match[2];
+  const fractionalPart = match[3] ?? "";
+  const exponent = Number(match[4] ?? "0");
 
   if (!Number.isSafeInteger(exponent)) {
-    throw new Error(
-      `Invalid decimal exponent: ${rawValue}.`,
-    );
+    throw new Error(`Invalid decimal exponent: ${rawValue}.`);
   }
 
-  let coefficient =
-    BigInt(
-      `${integerPart}${fractionalPart}`,
-    );
-
-  let scale =
-    fractionalPart.length -
-    exponent;
+  let coefficient = BigInt(`${integerPart}${fractionalPart}`);
+  let scale = fractionalPart.length - exponent;
 
   if (coefficient === 0n) {
     return {
@@ -149,14 +145,8 @@ function getDecimalParts(
     };
   }
 
-  while (
-    coefficient % 10n ===
-      0n &&
-    scale > 0
-  ) {
-    coefficient /=
-      10n;
-
+  while (coefficient % 10n === 0n && scale > 0) {
+    coefficient /= 10n;
     scale -= 1;
   }
 
@@ -168,20 +158,11 @@ function getDecimalParts(
 }
 
 function decimalsEqual(
-  left:
-    | mongoose.Types.Decimal128
-    | string
-    | number,
-  right:
-    | mongoose.Types.Decimal128
-    | string
-    | number,
+  left: mongoose.Types.Decimal128 | string | number,
+  right: mongoose.Types.Decimal128 | string | number,
 ): boolean {
-  const leftParts =
-    getDecimalParts(left);
-
-  const rightParts =
-    getDecimalParts(right);
+  const leftParts = getDecimalParts(left);
+  const rightParts = getDecimalParts(right);
 
   if (
     leftParts.coefficient === 0n &&
@@ -191,38 +172,26 @@ function decimalsEqual(
   }
 
   if (
-    leftParts.sign !==
-      rightParts.sign ||
-    leftParts.scale !==
-      rightParts.scale
+    leftParts.sign !== rightParts.sign ||
+    leftParts.scale !== rightParts.scale
   ) {
     return false;
   }
 
-  return (
-    leftParts.coefficient ===
-    rightParts.coefficient
-  );
+  return leftParts.coefficient === rightParts.coefficient;
 }
 
-function isDuplicateKeyError(
-  error: unknown,
-): boolean {
+function isDuplicateKeyError(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code?: number }).code ===
-      11000
+    (error as { code?: number }).code === 11000
   );
 }
 
-function isPaymentStatus(
-  value: string,
-): value is PaymentStatus {
-  return (
-    PAYMENT_STATUSES as readonly string[]
-  ).includes(value);
+function isPaymentStatus(value: string): value is PaymentStatus {
+  return (PAYMENT_STATUSES as readonly string[]).includes(value);
 }
 
 function isChargeVerificationStatus(
@@ -246,28 +215,95 @@ function buildPaymentMetadata(
     | Record<string, string | number | boolean>
     | undefined,
 ): Map<string, string> {
-  const metadata =
-    new Map<string, string>();
+  const metadata = new Map<string, string>();
 
-  for (const [key, value] of Object.entries(
-    inputMetadata ?? {},
-  )) {
-    metadata.set(
-      key,
-      String(value),
-    );
+  for (const [key, value] of Object.entries(inputMetadata ?? {})) {
+    metadata.set(key, String(value));
   }
 
-  for (const [key, value] of Object.entries(
-    productMetadata ?? {},
-  )) {
-    metadata.set(
-      key,
-      String(value),
-    );
+  for (const [key, value] of Object.entries(productMetadata ?? {})) {
+    metadata.set(key, String(value));
   }
 
   return metadata;
+}
+
+function getMetadataValue(
+  metadata: Map<string, string> | undefined,
+  key: string,
+): string | undefined {
+  const value = metadata?.get(key);
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+
+  return normalized || undefined;
+}
+
+function getWorkshopPaymentMetadata(
+  metadata: Map<string, string> | undefined,
+): WorkshopPaymentMetadata {
+  return {
+    registrationFullName: getMetadataValue(
+      metadata,
+      "registrationFullName",
+    ),
+    registrationEmail: getMetadataValue(
+      metadata,
+      "registrationEmail",
+    )?.toLowerCase(),
+    registrationPhone: getMetadataValue(
+      metadata,
+      "registrationPhone",
+    ),
+    registrationOrganisationName: getMetadataValue(
+      metadata,
+      "registrationOrganisationName",
+    ),
+  };
+}
+
+function validateWorkshopRegistrationMetadata(
+  metadata: Map<string, string> | undefined,
+): ValidatedWorkshopPaymentMetadata {
+  const registration = getWorkshopPaymentMetadata(metadata);
+
+  if (!registration.registrationFullName) {
+    throw new Error("Workshop registration full name is required.");
+  }
+
+  if (!registration.registrationEmail) {
+    throw new Error("Workshop registration email is required.");
+  }
+
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!emailPattern.test(registration.registrationEmail)) {
+    throw new Error(
+      "A valid workshop registration email address is required.",
+    );
+  }
+
+  return {
+    registrationFullName: registration.registrationFullName,
+    registrationEmail: registration.registrationEmail,
+    registrationPhone: registration.registrationPhone,
+    registrationOrganisationName:
+      registration.registrationOrganisationName,
+  };
+}
+
+function isBlockingReservationConflict(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /already have a (?:pending|confirmed|active) reservation|already have a confirmed reservation|already have a pending reservation|active reservation/i.test(
+    error.message,
+  );
 }
 
 class PaymentService {
@@ -278,49 +314,26 @@ class PaymentService {
   private async resolveProduct(
     input: CreatePaymentInput,
   ): Promise<ResolvedPaymentProduct> {
-    const currency =
-      normalizeCurrency(
-        input.currency,
-      );
+    const currency = normalizeCurrency(input.currency);
+    const productType: PaymentProductType = input.productType;
 
-    const productType: PaymentProductType =
-      input.productType;
-
-    if (
-      !mongoose.isValidObjectId(
-        input.productId,
-      )
-    ) {
-      throw new Error(
-        "Invalid payment product ID.",
-      );
+    if (!mongoose.isValidObjectId(input.productId)) {
+      throw new Error("Invalid payment product ID.");
     }
 
-    const productId =
-      new mongoose.Types.ObjectId(
-        input.productId,
-      );
+    const productId = new mongoose.Types.ObjectId(input.productId);
 
-    if (
-      productType ===
-      "service"
-    ) {
-      const service =
-        await Service.findOne({
-          _id: productId,
-          isActive: true,
-        });
+    if (productType === "service") {
+      const service = await Service.findOne({
+        _id: productId,
+        isActive: true,
+      });
 
       if (!service) {
-        throw new Error(
-          "The selected service is unavailable.",
-        );
+        throw new Error("The selected service is unavailable.");
       }
 
-      const amount =
-        service.pricing.get(
-          currency,
-        );
+      const amount = service.pricing.get(currency);
 
       if (!amount) {
         throw new Error(
@@ -330,62 +343,41 @@ class PaymentService {
 
       return {
         type: "service",
-        productId:
-          service._id,
+        productId: service._id,
         name: service.name,
         currency,
         amount,
         metadata: {
-          serviceType:
-            service.type,
-          ...(service.durationMinutes !==
-            undefined && {
-            durationMinutes:
-              service.durationMinutes,
+          serviceType: service.type,
+          ...(service.durationMinutes !== undefined && {
+            durationMinutes: service.durationMinutes,
           }),
-          ...(service.sessionCount !==
-            undefined && {
-            sessionCount:
-              service.sessionCount,
+          ...(service.sessionCount !== undefined && {
+            sessionCount: service.sessionCount,
           }),
         },
       };
     }
 
-    if (
-      productType ===
-      "programme"
-    ) {
+    if (productType === "programme") {
       if (!input.optionId?.trim()) {
-        throw new Error(
-          "A programme pricing option is required.",
-        );
+        throw new Error("A programme pricing option is required.");
       }
 
-      const programme =
-        await Programme.findOne({
-          _id: productId,
-          status: "published",
-        });
+      const programme = await Programme.findOne({
+        _id: productId,
+        status: "published",
+      });
 
       if (!programme) {
-        throw new Error(
-          "The selected programme is unavailable.",
-        );
+        throw new Error("The selected programme is unavailable.");
       }
 
-      const optionCode =
-        input.optionId
-          .trim()
-          .toLowerCase();
+      const optionCode = input.optionId.trim().toLowerCase();
 
-      const option =
-        programme.pricingOptions.find(
-          (item) =>
-            item.code ===
-              optionCode &&
-            item.isActive,
-        );
+      const option = programme.pricingOptions.find(
+        (item) => item.code === optionCode && item.isActive,
+      );
 
       if (!option) {
         throw new Error(
@@ -393,33 +385,21 @@ class PaymentService {
         );
       }
 
-      const now =
-        new Date();
+      const now = new Date();
 
-      if (
-        option.availableFrom &&
-        now <
-          option.availableFrom
-      ) {
+      if (option.availableFrom && now < option.availableFrom) {
         throw new Error(
           "The selected programme pricing option is not yet available.",
         );
       }
 
-      if (
-        option.availableUntil &&
-        now >
-          option.availableUntil
-      ) {
+      if (option.availableUntil && now >= option.availableUntil) {
         throw new Error(
           "The selected programme pricing option has expired.",
         );
       }
 
-      const amount =
-        option.pricing.get(
-          currency,
-        );
+      const amount = option.pricing.get(currency);
 
       if (!amount) {
         throw new Error(
@@ -427,91 +407,91 @@ class PaymentService {
         );
       }
 
+      const optionName = option.name?.trim();
+
+      if (!optionName) {
+        throw new Error(
+          "The selected programme pricing option is missing a valid name.",
+        );
+      }
+
       return {
         type: "programme",
-        productId:
-          programme._id,
-        name:
-          programme.title,
-        optionId:
-          option.code,
-        optionName:
-          option.name,
+        productId: programme._id,
+        name: programme.title,
+        optionId: option.code,
+        optionName,
         currency,
         amount,
         metadata: {
-          pricingType:
-            option.code,
+          pricingType: option.code,
         },
       };
     }
 
-    if (
-      productType ===
-      "workshop"
-    ) {
+    if (productType === "workshop") {
       if (!input.optionId?.trim()) {
-        throw new Error(
-          "A workshop ticket type is required.",
-        );
+        throw new Error("A workshop ticket type is required.");
       }
 
-      const workshop =
-        await Workshop.findOne({
-          _id: productId,
-          status: "published",
-        });
+      const workshop = await Workshop.findOne({
+        _id: productId,
+        status: "published",
+      });
 
       if (!workshop) {
-        throw new Error(
-          "The selected workshop is unavailable.",
-        );
+        throw new Error("The selected workshop is unavailable.");
       }
 
-      if (
-        !workshop.registrationRequired
-      ) {
-        throw new Error(
-          "Registration is not required for this workshop.",
-        );
+      if (!workshop.registrationRequired) {
+        throw new Error("Registration is not required for this workshop.");
       }
 
-      const now =
-        new Date();
+      const now = new Date();
+
+      if (workshop.startDate <= now) {
+        throw new Error(
+          "Registration for this workshop is no longer available because the workshop has started.",
+        );
+      }
 
       if (
         workshop.registrationDeadline &&
-        now >
-          workshop.registrationDeadline
+        now >= workshop.registrationDeadline
       ) {
-        throw new Error(
-          "Registration for this workshop has closed.",
-        );
+        throw new Error("Registration for this workshop has closed.");
       }
 
-      const ticketCode =
-        input.optionId
-          .trim()
-          .toLowerCase();
+      const ticketCode = input.optionId.trim().toLowerCase();
 
-      const ticket =
-        workshop.ticketTypes.find(
-          (item) =>
-            item.code ===
-              ticketCode &&
-            item.isActive,
-        );
+      const ticket = workshop.ticketTypes.find(
+        (item) =>
+          item.code.trim().toLowerCase() === ticketCode &&
+          item.isActive,
+      );
 
       if (!ticket) {
+        throw new Error("The selected workshop ticket is unavailable.");
+      }
+
+      const ticketName = ticket.name?.trim();
+
+      if (!ticketName) {
         throw new Error(
-          "The selected workshop ticket is unavailable.",
+          "The selected workshop ticket is missing a valid name.",
         );
       }
 
-      const amount =
-        ticket.pricing.get(
-          currency,
+      if (
+        !Number.isInteger(ticket.attendeeCount) ||
+        ticket.attendeeCount <= 0
+      ) {
+        throw new Error(
+          "The selected workshop ticket has an invalid attendee count.",
         );
+      }
+
+      const amount = ticket.pricing.get(currency);
 
       if (!amount) {
         throw new Error(
@@ -521,21 +501,15 @@ class PaymentService {
 
       return {
         type: "workshop",
-        productId:
-          workshop._id,
-        name:
-          workshop.title,
-        optionId:
-          ticket.code,
-        optionName:
-          ticket.name,
+        productId: workshop._id,
+        name: workshop.title,
+        optionId: ticket.code,
+        optionName: ticketName,
         currency,
         amount,
         metadata: {
-          ticketCode:
-            ticket.code,
-          attendeeCount:
-            ticket.attendeeCount,
+          ticketCode: ticket.code,
+          attendeeCount: ticket.attendeeCount,
         },
       };
     }
@@ -548,31 +522,17 @@ class PaymentService {
   private async getCustomer(
     clientId: string,
   ): Promise<PaymentCustomer> {
-    if (
-      !mongoose.isValidObjectId(
-        clientId,
-      )
-    ) {
-      throw new Error(
-        "Invalid client ID.",
-      );
+    if (!mongoose.isValidObjectId(clientId)) {
+      throw new Error("Invalid client ID.");
     }
 
-    const client =
-      await Client.findById(
-        clientId,
-      ).lean();
+    const client = await Client.findById(clientId).lean();
 
     if (!client) {
-      throw new Error(
-        "Client account was not found.",
-      );
+      throw new Error("Client account was not found.");
     }
 
-    const user =
-      await User.findById(
-        client.userId,
-      ).lean();
+    const user = await User.findById(client.userId).lean();
 
     if (!user) {
       throw new Error(
@@ -580,10 +540,7 @@ class PaymentService {
       );
     }
 
-    const email =
-      user.email
-        ?.trim()
-        .toLowerCase();
+    const email = user.email?.trim().toLowerCase();
 
     if (!email) {
       throw new Error(
@@ -592,16 +549,11 @@ class PaymentService {
     }
 
     return {
-      clientId:
-        client._id,
+      clientId: client._id,
       email,
-      firstName:
-        client.firstName.trim(),
-      lastName:
-        client.lastName.trim(),
-      phone:
-        client.phone?.trim() ||
-        undefined,
+      firstName: client.firstName.trim(),
+      lastName: client.lastName.trim(),
+      phone: client.phone?.trim() || undefined,
     };
   }
 
@@ -615,101 +567,215 @@ class PaymentService {
     });
   }
 
+  private async createWorkshopReservationForPayment(
+    payment: mongoose.HydratedDocument<IPayment>,
+    metadata: Map<string, string>,
+  ) {
+    const registration =
+      validateWorkshopRegistrationMetadata(metadata);
+
+    if (!payment.optionId) {
+      throw new Error(
+        "Workshop ticket information is missing from the payment.",
+      );
+    }
+
+    const workshop = await Workshop.findOne({
+      _id: payment.productId,
+      status: "published",
+    });
+
+    if (!workshop) {
+      throw new Error("The selected workshop is no longer available.");
+    }
+
+    if (!workshop.registrationRequired) {
+      throw new Error("Registration is not required for this workshop.");
+    }
+
+    const now = new Date();
+
+    if (workshop.startDate <= now) {
+      throw new Error(
+        "Registration for this workshop is no longer available because the workshop has started.",
+      );
+    }
+
+    if (
+      workshop.registrationDeadline &&
+      now >= workshop.registrationDeadline
+    ) {
+      throw new Error("Registration for this workshop has closed.");
+    }
+
+    const ticketCode = payment.optionId.trim().toLowerCase();
+
+    const ticket = workshop.ticketTypes.find(
+      (item) =>
+        item.code.trim().toLowerCase() === ticketCode &&
+        item.isActive,
+    );
+
+    if (!ticket) {
+      throw new Error(
+        "The selected workshop ticket is no longer available.",
+      );
+    }
+
+    const ticketName = ticket.name?.trim();
+
+    if (!ticketName) {
+      throw new Error(
+        "The selected workshop ticket is missing a valid name.",
+      );
+    }
+
+    if (
+      !Number.isInteger(ticket.attendeeCount) ||
+      ticket.attendeeCount <= 0
+    ) {
+      throw new Error(
+        "The selected workshop ticket has an invalid attendee count.",
+      );
+    }
+
+    if (
+      ticket.attendeeCount !==
+      Number(metadata.get("attendeeCount"))
+    ) {
+      throw new Error(
+        "The workshop ticket attendee count no longer matches the payment.",
+      );
+    }
+
+    const ticketAmount = ticket.pricing.get(payment.currency);
+
+    if (!ticketAmount) {
+      throw new Error(
+        `The selected workshop ticket is no longer available in ${payment.currency}.`,
+      );
+    }
+
+    if (!decimalsEqual(payment.amount, ticketAmount)) {
+      throw new Error(
+        "The workshop ticket price no longer matches the payment amount.",
+      );
+    }
+
+    const reservation = await createWorkshopReservation({
+      workshopId: payment.productId.toString(),
+      clientId: payment.clientId.toString(),
+      ticketCode: ticket.code,
+      ticketName,
+      attendeeCount: ticket.attendeeCount,
+      amount: payment.amount,
+      currency: payment.currency,
+      fullName: registration.registrationFullName,
+      email: registration.registrationEmail,
+      phone: registration.registrationPhone,
+      organisationName: registration.registrationOrganisationName,
+      expiresAt: new Date(
+        Date.now() + WORKSHOP_RESERVATION_MINUTES * 60 * 1000,
+      ),
+      paymentId: payment._id.toString(),
+    });
+
+    payment.workshopReservationId = reservation._id;
+
+    await payment.save();
+
+    return reservation;
+  }
+
+  private async releaseReservationAfterFailure(
+    payment: mongoose.HydratedDocument<IPayment>,
+  ): Promise<void> {
+    if (
+      payment.productType !== "workshop" ||
+      !payment.workshopReservationId
+    ) {
+      return;
+    }
+
+    try {
+      await releaseWorkshopReservation(
+        payment.workshopReservationId.toString(),
+        "cancelled",
+      );
+    } catch {
+      // Reservation cleanup can be retried independently.
+    }
+  }
+
   async createPayment(
     clientId: string,
     input: CreatePaymentInput,
   ) {
-    if (
-      !input.idempotencyKey?.trim()
-    ) {
-      throw new Error(
-        "Payment idempotency key is required.",
-      );
+    if (!input.idempotencyKey?.trim()) {
+      throw new Error("Payment idempotency key is required.");
     }
 
-    const idempotencyKey =
-      input.idempotencyKey.trim();
+    const idempotencyKey = input.idempotencyKey.trim();
 
-    const existingPayment =
-      await this.findExistingPayment(
-        clientId,
-        idempotencyKey,
-      );
+    const existingPayment = await this.findExistingPayment(
+      clientId,
+      idempotencyKey,
+    );
 
     if (existingPayment) {
       return existingPayment;
     }
 
-    const customer =
-      await this.getCustomer(
+    const customer = await this.getCustomer(clientId);
+
+    const product = await this.resolveProduct({
+      ...input,
+      idempotencyKey,
+    });
+
+    const metadata = buildPaymentMetadata(
+      input.metadata,
+      product.metadata,
+    );
+
+    if (product.type === "workshop") {
+      validateWorkshopRegistrationMetadata(metadata);
+
+      // Reject an existing blocking reservation before creating a
+      // payment document. Keep the check inside reservation creation
+      // as well to protect against concurrent payment requests.
+      await assertNoBlockingWorkshopReservation(
         clientId,
+        product.productId.toString(),
       );
+    }
 
-    const product =
-      await this.resolveProduct({
-        ...input,
-        idempotencyKey,
-      });
-
-    const metadata =
-      buildPaymentMetadata(
-        input.metadata,
-        product.metadata,
-      );
-
-    const payment =
-      new Payment({
-        clientId:
-          customer.clientId,
-
-        reference:
-          generatePaymentReference(),
-
-        productType:
-          product.type,
-
-        productId:
-          product.productId,
-
-        optionId:
-          product.optionId,
-
-        productName:
-          product.name,
-
-        optionName:
-          product.optionName,
-
-        amount:
-          product.amount,
-
-        currency:
-          product.currency,
-
-        status:
-          "pending",
-
-        idempotencyKey,
-
-        metadata,
-      });
+    const payment = new Payment({
+      clientId: customer.clientId,
+      reference: generatePaymentReference(),
+      productType: product.type,
+      productId: product.productId,
+      optionId: product.optionId,
+      productName: product.name,
+      optionName: product.optionName,
+      amount: product.amount,
+      currency: product.currency,
+      status: "pending",
+      idempotencyKey,
+      metadata,
+    });
 
     try {
       await payment.save();
     } catch (error) {
-      if (
-        !isDuplicateKeyError(
-          error,
-        )
-      ) {
+      if (!isDuplicateKeyError(error)) {
         throw error;
       }
 
-      const duplicatePayment =
-        await this.findExistingPayment(
-          clientId,
-          idempotencyKey,
-        );
+      const duplicatePayment = await this.findExistingPayment(
+        clientId,
+        idempotencyKey,
+      );
 
       if (duplicatePayment) {
         return duplicatePayment;
@@ -719,103 +785,82 @@ class PaymentService {
     }
 
     try {
-      const providerResult =
-        await this.provider.initialize({
-          reference:
-            payment.reference,
+      if (product.type === "workshop") {
+        try {
+          await this.createWorkshopReservationForPayment(
+            payment,
+            metadata,
+          );
+        } catch (error) {
+          // A concurrent request may have created a blocking
+          // reservation after the pre-check. Since checkout has not
+          // been initialized, remove this unused payment record.
+          if (isBlockingReservationConflict(error)) {
+            await Payment.deleteOne({
+              _id: payment._id,
+              clientId: customer.clientId,
+              status: "pending",
+            });
 
-          amount:
-            payment.amount,
+            throw error;
+          }
 
-          currency:
-            payment.currency,
+          throw error;
+        }
+      }
 
-          customer: {
-            email:
-              customer.email,
+      const providerResult = await this.provider.initialize({
+        reference: payment.reference,
+        amount: payment.amount,
+        currency: payment.currency,
+        customer: {
+          email: customer.email,
+          firstName: customer.firstName,
+          lastName: customer.lastName,
+          phone: customer.phone,
+        },
+        metadata: {
+          paymentReference: payment.reference,
+          productType: product.type,
+          productId: product.productId.toString(),
+          ...(product.optionId && {
+            optionId: product.optionId,
+          }),
+          ...(payment.workshopReservationId && {
+            workshopReservationId:
+              payment.workshopReservationId.toString(),
+          }),
+          ...Object.fromEntries(metadata.entries()),
+        },
+        redirectUrl: getPaymentRedirectUrl(),
+      });
 
-            firstName:
-              customer.firstName,
+      payment.providerReference = providerResult.providerReference;
+      payment.checkoutUrl = providerResult.checkoutUrl;
 
-            lastName:
-              customer.lastName,
-
-            phone:
-              customer.phone,
-          },
-
-          metadata: {
-            paymentReference:
-              payment.reference,
-
-            productType:
-              product.type,
-
-            productId:
-              product.productId.toString(),
-
-            ...(product.optionId && {
-              optionId:
-                product.optionId,
-            }),
-
-            ...Object.fromEntries(
-              metadata.entries(),
-            ),
-          },
-
-          redirectUrl:
-            getPaymentRedirectUrl(),
-        });
-
-      payment.providerReference =
-        providerResult.providerReference;
-
-      payment.checkoutUrl =
-        providerResult.checkoutUrl;
-
-      if (
-        providerResult.status ===
-        "pending"
-      ) {
-        transitionPaymentStatus(
-          payment,
-          "pending",
-        );
+      if (providerResult.status === "pending") {
+        transitionPaymentStatus(payment, "pending");
       } else {
-        transitionPaymentStatus(
-          payment,
-          "processing",
-        );
+        transitionPaymentStatus(payment, "processing");
       }
 
       await payment.save();
 
       return payment;
     } catch (error) {
-      if (
-        error instanceof
-        KoraRateLimitError
-      ) {
+      // A duplicate-reservation conflict has already removed the
+      // unused payment record. Do not recreate it as a failed payment.
+      if (isBlockingReservationConflict(error)) {
         throw error;
       }
 
-      if (
-        canTransitionPaymentStatus(
-          payment.status,
-          "failed",
-        )
-      ) {
-        transitionPaymentStatus(
-          payment,
-          "failed",
-        );
-      } else {
-        payment.status =
-          "failed";
+      await this.releaseReservationAfterFailure(payment);
 
-        payment.failedAt =
-          new Date();
+      if (canTransitionPaymentStatus(payment.status, "failed")) {
+        transitionPaymentStatus(payment, "failed");
+      } else {
+        payment.status = "failed";
+        payment.failedAt = new Date();
       }
 
       payment.failureReason =
@@ -829,58 +874,38 @@ class PaymentService {
     }
   }
 
-  async verifyPayment(
-    reference: string,
-  ) {
-    const normalizedReference =
-      reference.trim();
+  async verifyPayment(reference: string) {
+    const normalizedReference = reference.trim();
 
     if (!normalizedReference) {
-      throw new Error(
-        "Payment reference is required.",
-      );
+      throw new Error("Payment reference is required.");
     }
 
-    const payment =
-      await Payment.findOne({
-        reference:
-          normalizedReference,
-      });
+    const payment = await Payment.findOne({
+      reference: normalizedReference,
+    });
 
     if (!payment) {
-      throw new Error(
-        "Payment was not found.",
-      );
+      throw new Error("Payment was not found.");
     }
 
-    if (
-      payment.status ===
-      "successful"
-    ) {
-      await paymentFulfilmentService.fulfilPayment(
-        payment._id,
-      );
+    if (payment.status === "successful") {
+      await paymentFulfilmentService.fulfilPayment(payment._id);
 
       return payment;
     }
 
-    if (
-      payment.status ===
-      "refunded"
-    ) {
+    if (payment.status === "refunded") {
       return payment;
     }
 
     if (!payment.providerReference) {
-      throw new Error(
-        "Payment does not have a provider reference.",
-      );
+      throw new Error("Payment does not have a provider reference.");
     }
 
-    const verification =
-      await this.provider.verify(
-        payment.providerReference,
-      );
+    const verification = await this.provider.verify(
+      payment.providerReference,
+    );
 
     this.validateVerification(
       payment.amount,
@@ -888,36 +913,63 @@ class PaymentService {
       verification,
     );
 
-    this.applyVerificationStatus(
-      payment,
-      verification,
-    );
+    this.applyVerificationStatus(payment, verification);
 
     await payment.save();
 
+    if (verification.status === "successful") {
+      await paymentFulfilmentService.fulfilPayment(payment._id);
+    }
+
     if (
-      verification.status ===
-      "successful"
+      verification.status === "failed" ||
+      verification.status === "cancelled" ||
+      verification.status === "expired"
     ) {
-      await paymentFulfilmentService.fulfilPayment(
-        payment._id,
+      await this.releaseWorkshopReservationForPayment(
+        payment,
+        verification.status === "expired"
+          ? "expired"
+          : "cancelled",
       );
     }
 
     return payment;
   }
 
+  private async releaseWorkshopReservationForPayment(
+    payment: {
+      productType: PaymentProductType;
+      workshopReservationId?: mongoose.Types.ObjectId;
+    },
+    status: "expired" | "cancelled",
+  ): Promise<void> {
+    if (
+      payment.productType !== "workshop" ||
+      !payment.workshopReservationId
+    ) {
+      return;
+    }
+
+    try {
+      await releaseWorkshopReservation(
+        payment.workshopReservationId.toString(),
+        status,
+      );
+    } catch {
+      // Reservation cleanup must not prevent the verified payment
+      // status from being saved.
+    }
+  }
+
   private validateVerification(
-    expectedAmount:
-      mongoose.Types.Decimal128,
+    expectedAmount: mongoose.Types.Decimal128,
     expectedCurrency: Currency,
-    verification:
-      PaymentProviderVerificationResult,
+    verification: PaymentProviderVerificationResult,
   ): void {
     if (
       verification.currency &&
-      verification.currency !==
-        expectedCurrency
+      verification.currency !== expectedCurrency
     ) {
       throw new Error(
         "Payment currency does not match the original payment.",
@@ -926,10 +978,7 @@ class PaymentService {
 
     if (
       verification.amount &&
-      !decimalsEqual(
-        expectedAmount,
-        verification.amount,
-      )
+      !decimalsEqual(expectedAmount, verification.amount)
     ) {
       throw new Error(
         "Payment amount does not match the original payment.",
@@ -937,13 +986,9 @@ class PaymentService {
     }
 
     if (
-      verification.status ===
-        "successful" &&
+      verification.status === "successful" &&
       verification.amountPaid &&
-      !decimalsEqual(
-        expectedAmount,
-        verification.amountPaid,
-      )
+      !decimalsEqual(expectedAmount, verification.amountPaid)
     ) {
       throw new Error(
         "The amount paid does not match the original payment.",
@@ -960,28 +1005,17 @@ class PaymentService {
       expiredAt?: Date;
       failureReason?: string;
     },
-    verification:
-      PaymentProviderVerificationResult,
+    verification: PaymentProviderVerificationResult,
   ): void {
-    const status =
-      verification.status;
+    const status = verification.status;
 
-    if (
-      !isChargeVerificationStatus(
-        status,
-      )
-    ) {
+    if (!isChargeVerificationStatus(status)) {
       throw new Error(
         `Unsupported payment verification status: ${status}.`,
       );
     }
 
-    if (
-      !canTransitionPaymentStatus(
-        payment.status,
-        status,
-      )
-    ) {
+    if (!canTransitionPaymentStatus(payment.status, status)) {
       throw new Error(
         `Invalid payment status transition: ${payment.status} -> ${status}.`,
       );
@@ -989,70 +1023,32 @@ class PaymentService {
 
     switch (status) {
       case "successful":
-        transitionPaymentStatus(
-          payment,
-          "successful",
-        );
-
-        payment.paidAt =
-          payment.paidAt ??
-          new Date();
-
-        payment.failureReason =
-          undefined;
-
+        transitionPaymentStatus(payment, "successful");
+        payment.paidAt = payment.paidAt ?? new Date();
+        payment.failureReason = undefined;
         break;
 
       case "failed":
-        transitionPaymentStatus(
-          payment,
-          "failed",
-        );
-
-        payment.failedAt =
-          payment.failedAt ??
-          new Date();
-
+        transitionPaymentStatus(payment, "failed");
+        payment.failedAt = payment.failedAt ?? new Date();
         break;
 
       case "cancelled":
-        transitionPaymentStatus(
-          payment,
-          "cancelled",
-        );
-
-        payment.cancelledAt =
-          payment.cancelledAt ??
-          new Date();
-
+        transitionPaymentStatus(payment, "cancelled");
+        payment.cancelledAt = payment.cancelledAt ?? new Date();
         break;
 
       case "expired":
-        transitionPaymentStatus(
-          payment,
-          "expired",
-        );
-
-        payment.expiredAt =
-          payment.expiredAt ??
-          new Date();
-
+        transitionPaymentStatus(payment, "expired");
+        payment.expiredAt = payment.expiredAt ?? new Date();
         break;
 
       case "processing":
-        transitionPaymentStatus(
-          payment,
-          "processing",
-        );
-
+        transitionPaymentStatus(payment, "processing");
         break;
 
       case "pending":
-        transitionPaymentStatus(
-          payment,
-          "pending",
-        );
-
+        transitionPaymentStatus(payment, "pending");
         break;
     }
   }
@@ -1061,29 +1057,19 @@ class PaymentService {
     clientId: string,
     reference: string,
   ) {
-    if (
-      !mongoose.isValidObjectId(
-        clientId,
-      )
-    ) {
-      throw new Error(
-        "Invalid client ID.",
-      );
+    if (!mongoose.isValidObjectId(clientId)) {
+      throw new Error("Invalid client ID.");
     }
 
-    const normalizedReference =
-      reference.trim();
+    const normalizedReference = reference.trim();
 
     if (!normalizedReference) {
-      throw new Error(
-        "Payment reference is required.",
-      );
+      throw new Error("Payment reference is required.");
     }
 
     return Payment.findOne({
       clientId,
-      reference:
-        normalizedReference,
+      reference: normalizedReference,
     });
   }
 
@@ -1091,24 +1077,12 @@ class PaymentService {
     clientId: string,
     paymentId: string,
   ) {
-    if (
-      !mongoose.isValidObjectId(
-        clientId,
-      )
-    ) {
-      throw new Error(
-        "Invalid client ID.",
-      );
+    if (!mongoose.isValidObjectId(clientId)) {
+      throw new Error("Invalid client ID.");
     }
 
-    if (
-      !mongoose.isValidObjectId(
-        paymentId,
-      )
-    ) {
-      throw new Error(
-        "Invalid payment ID.",
-      );
+    if (!mongoose.isValidObjectId(paymentId)) {
+      throw new Error("Invalid payment ID.");
     }
 
     return Payment.findOne({
@@ -1125,56 +1099,33 @@ class PaymentService {
       skip?: number;
     },
   ) {
-    if (
-      !mongoose.isValidObjectId(
-        clientId,
-      )
-    ) {
-      throw new Error(
-        "Invalid client ID.",
-      );
+    if (!mongoose.isValidObjectId(clientId)) {
+      throw new Error("Invalid client ID.");
     }
 
-    const limit =
-      Math.min(
-        Math.max(
-          options?.limit ?? 20,
-          1,
-        ),
-        100,
-      );
+    const limit = Math.min(
+      Math.max(options?.limit ?? 20, 1),
+      100,
+    );
 
-    const skip =
-      Math.max(
-        options?.skip ?? 0,
-        0,
-      );
+    const skip = Math.max(options?.skip ?? 0, 0);
 
     const query: {
-      clientId:
-        mongoose.Types.ObjectId;
+      clientId: mongoose.Types.ObjectId;
       status?: PaymentStatus;
     } = {
-      clientId:
-        new mongoose.Types.ObjectId(
-          clientId,
-        ),
+      clientId: new mongoose.Types.ObjectId(clientId),
     };
 
     if (
       options?.status &&
-      isPaymentStatus(
-        options.status,
-      )
+      isPaymentStatus(options.status)
     ) {
-      query.status =
-        options.status;
+      query.status = options.status;
     }
 
     return Payment.find(query)
-      .sort({
-        createdAt: -1,
-      })
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
   }
@@ -1186,20 +1137,12 @@ class PaymentService {
       skip?: number;
     },
   ) {
-    const limit =
-      Math.min(
-        Math.max(
-          options?.limit ?? 20,
-          1,
-        ),
-        100,
-      );
+    const limit = Math.min(
+      Math.max(options?.limit ?? 20, 1),
+      100,
+    );
 
-    const skip =
-      Math.max(
-        options?.skip ?? 0,
-        0,
-      );
+    const skip = Math.max(options?.skip ?? 0, 0);
 
     const query: {
       status?: PaymentStatus;
@@ -1207,28 +1150,18 @@ class PaymentService {
 
     if (
       options?.status &&
-      isPaymentStatus(
-        options.status,
-      )
+      isPaymentStatus(options.status)
     ) {
-      query.status =
-        options.status;
+      query.status = options.status;
     }
 
-    const [
-      payments,
-      total,
-    ] = await Promise.all([
+    const [payments, total] = await Promise.all([
       Payment.find(query)
-        .sort({
-          createdAt: -1,
-        })
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
 
-      Payment.countDocuments(
-        query,
-      ),
+      Payment.countDocuments(query),
     ]);
 
     return {
@@ -1240,7 +1173,6 @@ class PaymentService {
   }
 }
 
-export const paymentService =
-  new PaymentService(
-    createPaymentProvider(),
-  );
+export const paymentService = new PaymentService(
+  createPaymentProvider(),
+);

@@ -2,29 +2,43 @@ import mongoose from "mongoose";
 
 import { Payment } from "../models/Payment.js";
 import { Service } from "../models/Service.js";
-import { Workshop } from "../models/Workshop.js";
 
 import {
   createAppointmentFromPayment,
 } from "./appointmentService.js";
+
+import {
+  confirmWorkshopReservation,
+  expireWorkshopReservation,
+  getWorkshopReservationByPaymentId,
+  recoverExpiredWorkshopReservation,
+} from "./workshopReservationService.js";
+
 import {
   createWorkshopRegistration,
+  getWorkshopRegistrationByPaymentId,
 } from "./workshopRegistrationService.js";
 
-type PaymentMetadata = Map<
-  string,
-  string
-> | undefined;
+type PaymentMetadata = Map<string, string> | undefined;
+
+type ServicePayment = {
+  _id: mongoose.Types.ObjectId;
+  clientId: mongoose.Types.ObjectId;
+  productId: mongoose.Types.ObjectId;
+  metadata?: PaymentMetadata;
+};
+
+type WorkshopPayment = {
+  _id: mongoose.Types.ObjectId;
+  clientId: mongoose.Types.ObjectId;
+  productId: mongoose.Types.ObjectId;
+};
 
 function getMetadataValue(
   metadata: PaymentMetadata,
   key: string,
 ): string | undefined {
-  if (!metadata) {
-    return undefined;
-  }
-
-  const value = metadata.get(key);
+  const value = metadata?.get(key);
 
   return value?.trim() || undefined;
 }
@@ -32,11 +46,10 @@ function getMetadataValue(
 function parseAppointmentDate(
   metadata: PaymentMetadata,
 ): Date {
-  const value =
-    getMetadataValue(
-      metadata,
-      "requestedDate",
-    );
+  const value = getMetadataValue(
+    metadata,
+    "requestedDate",
+  );
 
   if (!value) {
     throw new Error(
@@ -58,11 +71,10 @@ function parseAppointmentDate(
 function getAppointmentTime(
   metadata: PaymentMetadata,
 ): string {
-  const value =
-    getMetadataValue(
-      metadata,
-      "requestedTime",
-    );
+  const value = getMetadataValue(
+    metadata,
+    "requestedTime",
+  );
 
   if (!value) {
     throw new Error(
@@ -70,11 +82,7 @@ function getAppointmentTime(
     );
   }
 
-  if (
-    !/^([01]\d|2[0-3]):[0-5]\d$/.test(
-      value,
-    )
-  ) {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
     throw new Error(
       "Appointment time stored on the payment is invalid.",
     );
@@ -85,15 +93,11 @@ function getAppointmentTime(
 
 function getSessionType(
   metadata: PaymentMetadata,
-):
-  | "in_person"
-  | "online"
-  | "phone" {
-  const value =
-    getMetadataValue(
-      metadata,
-      "sessionType",
-    );
+): "in_person" | "online" | "phone" {
+  const value = getMetadataValue(
+    metadata,
+    "sessionType",
+  );
 
   if (
     value !== "in_person" &&
@@ -112,45 +116,29 @@ class PaymentFulfilmentService {
   async fulfilPayment(
     paymentId: mongoose.Types.ObjectId,
   ): Promise<void> {
-    const payment =
-      await Payment.findById(
-        paymentId,
-      );
+    const payment = await Payment.findById(paymentId);
 
     if (!payment) {
-      throw new Error(
-        "Payment was not found.",
-      );
+      throw new Error("Payment was not found.");
     }
 
-    if (
-      payment.status !==
-      "successful"
-    ) {
+    if (payment.status !== "successful") {
       throw new Error(
         "Only successful payments can be fulfilled.",
       );
     }
 
-    switch (
-      payment.productType
-    ) {
+    switch (payment.productType) {
       case "service":
-        await this.fulfilServicePayment(
-          payment,
-        );
+        await this.fulfilServicePayment(payment);
         return;
 
       case "programme":
-        await this.fulfilProgrammePayment(
-          payment,
-        );
+        await this.fulfilProgrammePayment(payment);
         return;
 
       case "workshop":
-        await this.fulfilWorkshopPayment(
-          payment,
-        );
+        await this.fulfilWorkshopPayment(payment);
         return;
 
       default:
@@ -161,17 +149,11 @@ class PaymentFulfilmentService {
   }
 
   private async fulfilServicePayment(
-    payment: {
-      _id: mongoose.Types.ObjectId;
-      clientId: mongoose.Types.ObjectId;
-      productId: mongoose.Types.ObjectId;
-      metadata?: PaymentMetadata;
-    },
+    payment: ServicePayment,
   ): Promise<void> {
-    const service =
-      await Service.findById(
-        payment.productId,
-      ).lean();
+    const service = await Service.findById(
+      payment.productId,
+    ).lean();
 
     if (!service) {
       throw new Error(
@@ -179,34 +161,41 @@ class PaymentFulfilmentService {
       );
     }
 
-    const requestedDate =
-      parseAppointmentDate(
-        payment.metadata,
+    try {
+      const appointmentInput = {
+        paymentId: payment._id.toString(),
+        clientId: payment.clientId.toString(),
+        serviceId: payment.productId.toString(),
+        requestedDate: parseAppointmentDate(
+          payment.metadata,
+        ),
+        requestedTime: getAppointmentTime(
+          payment.metadata,
+        ),
+        sessionType: getSessionType(
+          payment.metadata,
+        ),
+      };
+
+      await createAppointmentFromPayment(
+        appointmentInput,
+      );
+    } catch (error) {
+      console.error(
+        "[Appointment payment fulfilment failed]",
+        {
+          paymentId: payment._id.toString(),
+          clientId: payment.clientId.toString(),
+          serviceId: payment.productId.toString(),
+          metadata: payment.metadata
+            ? Object.fromEntries(payment.metadata)
+            : undefined,
+          error,
+        },
       );
 
-    const requestedTime =
-      getAppointmentTime(
-        payment.metadata,
-      );
-
-    const sessionType =
-      getSessionType(
-        payment.metadata,
-      );
-
-    await createAppointmentFromPayment(
-      {
-        paymentId:
-          payment._id.toString(),
-        clientId:
-          payment.clientId.toString(),
-        serviceId:
-          payment.productId.toString(),
-        requestedDate,
-        requestedTime,
-        sessionType,
-      },
-    );
+      throw error;
+    }
   }
 
   private async fulfilProgrammePayment(
@@ -222,139 +211,106 @@ class PaymentFulfilmentService {
   }
 
   private async fulfilWorkshopPayment(
-    payment: {
-      _id: mongoose.Types.ObjectId;
-      clientId: mongoose.Types.ObjectId;
-      productId: mongoose.Types.ObjectId;
-      optionId?: string;
-      amount: mongoose.Types.Decimal128;
-      currency:
-        | "NGN"
-        | "USD"
-        | "GBP";
-      metadata?: PaymentMetadata;
-    },
+    payment: WorkshopPayment,
   ): Promise<void> {
-    if (!payment.optionId) {
+    const paymentId = payment._id.toString();
+
+    let reservation =
+      await getWorkshopReservationByPaymentId(
+        paymentId,
+      );
+
+    if (!reservation) {
       throw new Error(
-        "Workshop payment is missing its ticket code.",
+        "Workshop reservation associated with this payment was not found.",
+      );
+    }
+
+    if (
+      reservation.clientId.toString() !==
+        payment.clientId.toString() ||
+      reservation.workshopId.toString() !==
+        payment.productId.toString()
+    ) {
+      throw new Error(
+        "Workshop reservation does not match the payment.",
       );
     }
 
     const existingRegistration =
-      await this.getExistingWorkshopRegistration(
-        payment._id,
+      await getWorkshopRegistrationByPaymentId(
+        paymentId,
       );
 
     if (existingRegistration) {
+      if (
+        existingRegistration.status === "cancelled" ||
+        existingRegistration.status === "refunded"
+      ) {
+        throw new Error(
+          `The registration for this successful payment has status "${existingRegistration.status}" and requires reconciliation.`,
+        );
+      }
+
       return;
     }
 
-    const workshop =
-      await Workshop.findById(
-        payment.productId,
-      ).lean();
-
-    if (!workshop) {
+    if (reservation.status === "cancelled") {
       throw new Error(
-        "The workshop attached to the payment no longer exists.",
+        "The workshop reservation was cancelled despite the successful payment and requires reconciliation.",
       );
     }
 
-    const ticket =
-      workshop.ticketTypes.find(
-        (item) =>
-          item.code.toLowerCase() ===
-          payment.optionId!
-            .toLowerCase(),
-      );
+    if (reservation.status === "expired") {
+      reservation =
+        await recoverExpiredWorkshopReservation(
+          reservation._id.toString(),
+          paymentId,
+        );
+    } else if (reservation.status === "pending") {
+      if (
+        reservation.expiresAt.getTime() <= Date.now()
+      ) {
+        await expireWorkshopReservation(
+          reservation._id.toString(),
+        );
 
-    if (!ticket) {
-      throw new Error(
-        "The workshop ticket attached to the payment no longer exists.",
-      );
+        reservation =
+          await recoverExpiredWorkshopReservation(
+            reservation._id.toString(),
+            paymentId,
+          );
+      } else {
+        reservation = await confirmWorkshopReservation(
+          reservation._id.toString(),
+        );
+      }
     }
 
-    if (!ticket.isActive) {
+    if (
+      reservation.status !== "confirmed" &&
+      reservation.status !== "recovered"
+    ) {
       throw new Error(
-        "The workshop ticket attached to the payment is no longer active.",
-      );
-    }
-
-    const fullName =
-      getMetadataValue(
-        payment.metadata,
-        "registrationFullName",
-      ) ?? "";
-
-    const email =
-      getMetadataValue(
-        payment.metadata,
-        "registrationEmail",
-      )?.toLowerCase() ?? "";
-
-    const phone =
-      getMetadataValue(
-        payment.metadata,
-        "registrationPhone",
-      );
-
-    const organisationName =
-      getMetadataValue(
-        payment.metadata,
-        "registrationOrganisationName",
-      );
-
-    if (!fullName) {
-      throw new Error(
-        "Workshop registration full name is missing from the payment.",
-      );
-    }
-
-    if (!email) {
-      throw new Error(
-        "Workshop registration email is missing from the payment.",
+        `Cannot fulfil a workshop reservation with status "${reservation.status}".`,
       );
     }
 
     await createWorkshopRegistration({
-      clientId:
-        payment.clientId.toString(),
-      workshopId:
-        payment.productId.toString(),
-      paymentId:
-        payment._id.toString(),
-      ticketCode:
-        ticket.code,
-      ticketName:
-        ticket.name,
-      attendeeCount:
-        ticket.attendeeCount,
-      amountPaid:
-        payment.amount,
-      currency:
-        payment.currency,
-      fullName,
-      email,
-      phone,
-      organisationName,
-      registeredAt:
-        new Date(),
-    });
-  }
-
-  private async getExistingWorkshopRegistration(
-    paymentId: mongoose.Types.ObjectId,
-  ) {
-    const {
-      WorkshopRegistration,
-    } = await import(
-      "../models/WorkshopRegistration.js"
-    );
-
-    return WorkshopRegistration.findOne({
+      clientId: reservation.clientId.toString(),
+      workshopId: reservation.workshopId.toString(),
       paymentId,
-    }).lean();
+      ticketCode: reservation.ticketCode,
+      ticketName: reservation.ticketName,
+      attendeeCount: reservation.attendeeCount,
+      amountPaid: reservation.amount,
+      currency: reservation.currency,
+      fullName: reservation.fullName,
+      email: reservation.email,
+      phone: reservation.phone,
+      organisationName:
+        reservation.organisationName,
+    });
   }
 }
 

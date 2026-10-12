@@ -4,6 +4,7 @@ const resourceTypeSchema = z.enum([
   "article",
   "video",
   "download",
+  "book",
 ]);
 
 const resourceStatusSchema = z.enum([
@@ -12,13 +13,17 @@ const resourceStatusSchema = z.enum([
   "archived",
 ]);
 
+const bookFormatSchema = z.enum([
+  "paperback",
+  "hardcover",
+  "ebook",
+  "audiobook",
+]);
+
 const titleSchema = z
   .string()
   .trim()
-  .min(
-    1,
-    "Resource title is required.",
-  )
+  .min(1, "Resource title is required.")
   .max(
     250,
     "Resource title must not exceed 250 characters.",
@@ -27,10 +32,7 @@ const titleSchema = z
 const slugSchema = z
   .string()
   .trim()
-  .min(
-    1,
-    "Resource slug is required.",
-  )
+  .min(1, "Resource slug is required.")
   .max(
     250,
     "Resource slug must not exceed 250 characters.",
@@ -70,189 +72,213 @@ const categorySchema = z
 const imageSchema = z
   .string()
   .trim()
-  .url(
-    "Featured image must be a valid URL.",
-  )
+  .url("Featured image must be a valid URL.")
   .max(1000)
   .optional();
 
 const resourceUrlSchema = z
   .string()
   .trim()
-  .url(
-    "Resource URL must be a valid URL.",
-  )
+  .url("Resource URL must be a valid URL.")
   .max(1000)
+  .optional();
+
+const authorSchema = z
+  .string()
+  .trim()
+  .min(1, "Book author is required.")
+  .max(
+    150,
+    "Book author must not exceed 150 characters.",
+  )
   .optional();
 
 /*
  * Create resource
  */
 
-export const createResourceSchema =
-  z
-    .object({
-      title:
-        titleSchema,
+export const createResourceSchema = z
+  .object({
+    title: titleSchema,
 
-      slug:
-        slugSchema,
+    slug: slugSchema,
 
-      type:
-        resourceTypeSchema,
+    type: resourceTypeSchema,
 
-      excerpt:
-        excerptSchema,
+    excerpt: excerptSchema,
 
-      content:
-        contentSchema,
+    content: contentSchema,
 
-      category:
-        categorySchema,
+    category: categorySchema,
 
-      featuredImage:
-        imageSchema,
+    featuredImage: imageSchema,
 
-      resourceUrl:
-        resourceUrlSchema,
+    resourceUrl: resourceUrlSchema,
 
-      status:
-        resourceStatusSchema.optional(),
+    author: authorSchema,
 
-      featured:
-        z.boolean().optional(),
-    })
-    .refine(
-      ({
-        type,
-        content,
-      }) =>
-        type !== "article" ||
-        Boolean(content?.trim()),
-      {
-        message:
-          "Article content is required.",
-        path: ["content"],
-      },
-    )
-    .refine(
-      ({
-        type,
+    bookFormat: bookFormatSchema.optional(),
+
+    status: resourceStatusSchema.optional(),
+
+    featured: z.boolean().optional(),
+  })
+  .refine(
+    ({ type, content }) =>
+      type !== "article" || Boolean(content?.trim()),
+    {
+      message: "Article content is required.",
+      path: ["content"],
+    },
+  )
+  .refine(
+    ({ type, resourceUrl }) =>
+      !["video", "download", "book"].includes(type) ||
+      Boolean(resourceUrl?.trim()),
+    {
+      message:
+        "Resource URL is required for videos, downloads, and books.",
+      path: ["resourceUrl"],
+    },
+  )
+  .refine(
+    ({ type, content }) =>
+      type === "article" || !content?.trim(),
+    {
+      message:
+        "Content is only supported for article resources.",
+      path: ["content"],
+    },
+  )
+  .refine(
+    ({ type, author }) =>
+      type !== "book" || Boolean(author?.trim()),
+    {
+      message: "Book author is required.",
+      path: ["author"],
+    },
+  )
+  .refine(
+    ({ type, bookFormat }) =>
+      type !== "book" || Boolean(bookFormat),
+    {
+      message: "Book format is required.",
+      path: ["bookFormat"],
+    },
+  )
+  .refine(
+    ({ type, resourceUrl }) =>
+      type !== "book" ||
+      !resourceUrl ||
+      /^https:\/\/(www\.)?amazon\.[a-z.]+\/.+/i.test(
         resourceUrl,
-      }) =>
-        (type !== "video" &&
-          type !== "download") ||
-        Boolean(
-          resourceUrl?.trim(),
-        ),
-      {
-        message:
-          "Resource URL is required for videos and downloads.",
-        path: [
-          "resourceUrl",
-        ],
-      },
-    )
-    .refine(
-      ({
-        type,
-        content,
-      }) =>
-        type === "article" ||
-        !content?.trim(),
-      {
-        message:
-          "Content is only supported for article resources.",
-        path: ["content"],
-      },
-    );
+      ),
+    {
+      message: "Books must use a valid Amazon product URL.",
+      path: ["resourceUrl"],
+    },
+  )
+  .refine(
+    ({ type, author, bookFormat }) =>
+      type === "book" ||
+      (!author && !bookFormat),
+    {
+      message:
+        "Author and book format are only supported for book resources.",
+      path: ["author"],
+    },
+  );
 
 /*
  * Update resource
  */
 
-export const updateResourceSchema =
-  z
-    .object({
-      title:
-        titleSchema.optional(),
+export const updateResourceSchema = z
+  .object({
+    title: titleSchema.optional(),
 
-      slug:
-        slugSchema.optional(),
+    slug: slugSchema.optional(),
 
-      type:
-        resourceTypeSchema.optional(),
+    type: resourceTypeSchema.optional(),
 
-      excerpt:
-        excerptSchema,
+    excerpt: excerptSchema,
 
-      content:
-        contentSchema,
+    content: contentSchema,
 
-      category:
-        categorySchema,
+    category: categorySchema,
 
-      featuredImage:
-        imageSchema,
+    featuredImage: imageSchema,
 
-      resourceUrl:
-        resourceUrlSchema,
+    resourceUrl: resourceUrlSchema,
 
-      featured:
-        z.boolean().optional(),
-    });
+    author: authorSchema,
+
+    bookFormat: bookFormatSchema.optional(),
+
+    featured: z.boolean().optional(),
+  })
+  .refine(
+    ({ type, content }) =>
+      type === undefined ||
+      type === "article" ||
+      !content?.trim(),
+    {
+      message:
+        "Content is only supported for article resources.",
+      path: ["content"],
+    },
+  )
+  .refine(
+    ({ type, author, bookFormat }) =>
+      type === undefined ||
+      type === "book" ||
+      (!author && !bookFormat),
+    {
+      message:
+        "Author and book format are only supported for book resources.",
+      path: ["author"],
+    },
+  );
 
 /*
  * Resource status
  */
 
-export const updateResourceStatusSchema =
-  z.object({
-    status:
-      resourceStatusSchema,
-  });
+export const updateResourceStatusSchema = z.object({
+  status: resourceStatusSchema,
+});
 
 /*
  * Featured status
  */
 
-export const updateResourceFeaturedSchema =
-  z.object({
-    featured:
-      z.boolean(),
-  });
+export const updateResourceFeaturedSchema = z.object({
+  featured: z.boolean(),
+});
 
 /*
  * Resource ID
  */
 
-export const resourceIdSchema =
-  z.object({
-    id: z
-      .string()
-      .trim()
-      .min(
-        1,
-        "Resource ID is required.",
-      ),
-  });
+export const resourceIdSchema = z.object({
+  id: z
+    .string()
+    .trim()
+    .min(1, "Resource ID is required."),
+});
 
 /*
  * Resource slug
  */
 
-export const resourceSlugSchema =
-  z.object({
-    slug: z
-      .string()
-      .trim()
-      .min(
-        1,
-        "Resource slug is required.",
-      )
-      .max(250)
-      .regex(
-        /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
-        "Invalid resource slug.",
-      ),
-  });
+export const resourceSlugSchema = z.object({
+  slug: z
+    .string()
+    .trim()
+    .min(1, "Resource slug is required.")
+    .max(250)
+    .regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Invalid resource slug.",
+    ),
+});

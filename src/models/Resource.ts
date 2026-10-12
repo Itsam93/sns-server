@@ -6,12 +6,19 @@ import mongoose, {
 export type ResourceType =
   | "article"
   | "video"
-  | "download";
+  | "download"
+  | "book";
 
 export type ResourceStatus =
   | "draft"
   | "published"
   | "archived";
+
+export type BookFormat =
+  | "paperback"
+  | "hardcover"
+  | "ebook"
+  | "audiobook";
 
 export interface IResource
   extends Document {
@@ -28,6 +35,9 @@ export interface IResource
   featuredImage?: string;
 
   resourceUrl?: string;
+
+  author?: string;
+  bookFormat?: BookFormat;
 
   status: ResourceStatus;
 
@@ -70,6 +80,7 @@ const resourceSchema =
           "article",
           "video",
           "download",
+          "book",
         ],
         required: true,
       },
@@ -83,6 +94,7 @@ const resourceSchema =
       content: {
         type: String,
         trim: true,
+        maxlength: 50000,
       },
 
       category: {
@@ -101,6 +113,22 @@ const resourceSchema =
         type: String,
         trim: true,
         maxlength: 1000,
+      },
+
+      author: {
+        type: String,
+        trim: true,
+        maxlength: 150,
+      },
+
+      bookFormat: {
+        type: String,
+        enum: [
+          "paperback",
+          "hardcover",
+          "ebook",
+          "audiobook",
+        ],
       },
 
       status: {
@@ -144,13 +172,56 @@ resourceSchema.pre(
     }
 
     if (
-      (this.type === "video" ||
-        this.type === "download") &&
+      (
+        this.type === "video" ||
+        this.type === "download" ||
+        this.type === "book"
+      ) &&
       !this.resourceUrl?.trim()
     ) {
       this.invalidate(
         "resourceUrl",
-        "Resource URL is required for videos and downloads.",
+        "Resource URL is required for videos, downloads, and books.",
+      );
+    }
+
+    if (
+      this.type === "book" &&
+      !this.author?.trim()
+    ) {
+      this.invalidate(
+        "author",
+        "Book author is required.",
+      );
+    }
+
+    if (
+      this.type === "book" &&
+      !this.bookFormat
+    ) {
+      this.invalidate(
+        "bookFormat",
+        "Book format is required.",
+      );
+    }
+
+    if (
+      this.type !== "book" &&
+      (this.author || this.bookFormat)
+    ) {
+      this.invalidate(
+        "author",
+        "Author and book format are only supported for book resources.",
+      );
+    }
+
+    if (
+      this.type !== "article" &&
+      this.content?.trim()
+    ) {
+      this.invalidate(
+        "content",
+        "Content is only supported for article resources.",
       );
     }
 
@@ -158,8 +229,7 @@ resourceSchema.pre(
       this.status === "published" &&
       !this.publishedAt
     ) {
-      this.publishedAt =
-        new Date();
+      this.publishedAt = new Date();
     }
 
     if (

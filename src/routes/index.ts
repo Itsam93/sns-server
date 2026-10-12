@@ -1,3 +1,4 @@
+
 import { Router } from "express";
 
 import appointmentRoutes from "./appointmentRoutes.js";
@@ -27,6 +28,7 @@ import websiteContentRoutes from "./websiteContentRoutes.js";
 import workshopParticipantRoutes from "./workshopParticipantRoutes.js";
 import workshopRegistrationRoutes from "./workshopRegistrationRoutes.js";
 import workshopRequestRoutes from "./workshopRequestRoutes.js";
+import workshopReservationRoutes from "./workshopReservationRoutes.js";
 import workshopRoutes from "./workshopRoutes.js";
 
 const router = Router();
@@ -43,10 +45,7 @@ router.use("/appointments", appointmentRoutes);
 
 router.use("/availability", availabilityRoutes);
 
-router.use(
-  "/availability-exceptions",
-  availabilityExceptionRoutes,
-);
+router.use("/availability-exceptions", availabilityExceptionRoutes);
 
 router.use("/slots", slotRoutes);
 
@@ -68,29 +67,19 @@ router.use("/workshops", workshopRoutes);
  * Client purchases and entitlements
  */
 
-router.use(
-  "/service-packages",
-  servicePackageRoutes,
-);
+router.use("/service-packages", servicePackageRoutes);
 
-router.use(
-  "/workshop-registrations",
-  workshopRegistrationRoutes,
-);
+router.use("/workshop-registrations", workshopRegistrationRoutes);
+
+router.use("/workshop-reservations", workshopReservationRoutes);
 
 /*
  * Workshop administration
  */
 
-router.use(
-  "/workshop-requests",
-  workshopRequestRoutes,
-);
+router.use("/workshop-requests", workshopRequestRoutes);
 
-router.use(
-  "/workshop-participants",
-  workshopParticipantRoutes,
-);
+router.use("/workshop-participants", workshopParticipantRoutes);
 
 /*
  * Website content
@@ -102,20 +91,11 @@ router.use("/resources", resourceRoutes);
 
 router.use("/faqs", faqRoutes);
 
-router.use(
-  "/contact-messages",
-  contactMessageRoutes,
-);
+router.use("/contact-messages", contactMessageRoutes);
 
-router.use(
-  "/website-content",
-  websiteContentRoutes,
-);
+router.use("/website-content", websiteContentRoutes);
 
-router.use(
-  "/media-assets",
-  mediaAssetRoutes,
-);
+router.use("/media-assets", mediaAssetRoutes);
 
 /*
  * Administration
@@ -129,13 +109,6 @@ router.use("/broadcasts", broadcastRoutes);
 
 router.use("/newsletter", newsletterRoutes);
 
-/*
- * Payments
- *
- * Includes:
- * - client payment endpoints
- * - Kora webhook endpoint
- */
 
 router.use("/payments", paymentRoutes);
 

@@ -1,8 +1,10 @@
+
 import rateLimit from "express-rate-limit";
 
 const authRateLimitMessage = {
   success: false,
-  message: "Too many authentication attempts. Please try again later.",
+  message:
+    "Too many authentication attempts. Please try again later.",
 };
 
 export const authRateLimiter = rateLimit({
@@ -13,6 +15,18 @@ export const authRateLimiter = rateLimit({
   message: authRateLimitMessage,
 });
 
+export const currentUserRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message:
+      "Too many profile requests. Please try again later.",
+  },
+});
+
 export const passwordResetRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   limit: 5,
@@ -20,6 +34,7 @@ export const passwordResetRateLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     success: false,
-    message: "Too many password reset attempts. Please try again later.",
+    message:
+      "Too many password reset attempts. Please try again later.",
   },
 });

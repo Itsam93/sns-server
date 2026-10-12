@@ -1,3 +1,4 @@
+
 import { Router } from "express";
 
 import {
@@ -11,9 +12,7 @@ import {
   verifyEmailAddress,
 } from "../controllers/authController.js";
 
-import {
-  requireAuth,
-} from "../middleware/authMiddleware.js";
+import { requireAuth } from "../middleware/authMiddleware.js";
 
 import {
   csrfTokenMiddleware,
@@ -22,12 +21,11 @@ import {
 
 import {
   authRateLimiter,
+  currentUserRateLimiter,
   passwordResetRateLimiter,
 } from "../middleware/rateLimitMiddleware.js";
 
-import {
-  validate,
-} from "../middleware/validateMiddleware.js";
+import { validate } from "../middleware/validateMiddleware.js";
 
 import {
   changePasswordSchema,
@@ -37,9 +35,7 @@ import {
   resetPasswordSchema,
 } from "../utils/validation.js";
 
-import {
-  asyncHandler,
-} from "../utils/asyncHandler.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 
@@ -50,8 +46,7 @@ router.get(
     res.status(200).json({
       success: true,
       data: {
-        csrfToken:
-          res.locals.csrfToken,
+        csrfToken: res.locals.csrfToken,
       },
     });
   },
@@ -67,9 +62,7 @@ router.post(
 
 router.get(
   "/verify-email",
-  asyncHandler(
-    verifyEmailAddress,
-  ),
+  asyncHandler(verifyEmailAddress),
 );
 
 router.post(
@@ -84,24 +77,16 @@ router.post(
   "/forgot-password",
   passwordResetRateLimiter,
   requireCsrfToken,
-  validate(
-    forgotPasswordSchema,
-  ),
-  asyncHandler(
-    forgotPassword,
-  ),
+  validate(forgotPasswordSchema),
+  asyncHandler(forgotPassword),
 );
 
 router.post(
   "/reset-password",
   passwordResetRateLimiter,
   requireCsrfToken,
-  validate(
-    resetPasswordSchema,
-  ),
-  asyncHandler(
-    resetPasswordController,
-  ),
+  validate(resetPasswordSchema),
+  asyncHandler(resetPasswordController),
 );
 
 router.post(
@@ -109,12 +94,8 @@ router.post(
   requireAuth,
   passwordResetRateLimiter,
   requireCsrfToken,
-  validate(
-    changePasswordSchema,
-  ),
-  asyncHandler(
-    changePasswordController,
-  ),
+  validate(changePasswordSchema),
+  asyncHandler(changePasswordController),
 );
 
 router.post(
@@ -126,6 +107,7 @@ router.post(
 
 router.get(
   "/me",
+  currentUserRateLimiter,
   requireAuth,
   asyncHandler(me),
 );

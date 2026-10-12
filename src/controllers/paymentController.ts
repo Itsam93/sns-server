@@ -1,3 +1,4 @@
+
 import type {
   Request,
   Response,
@@ -19,11 +20,24 @@ import {
   KoraRateLimitError,
 } from "../providers/koraProvider.js";
 
-function getClientId(
-  req: Request,
-): string {
-  const clientId =
-    req.user?.clientId;
+const PAYMENT_STATUSES: readonly PaymentStatus[] = [
+  "pending",
+  "processing",
+  "successful",
+  "failed",
+  "cancelled",
+  "expired",
+  "refunded",
+];
+
+const ADMIN_REQUIRED =
+  "Administrator access is required.";
+
+const RESOURCE_NOT_FOUND =
+  "Resource was not found.";
+
+function getClientId(req: Request): string {
+  const clientId = req.user?.clientId;
 
   if (
     typeof clientId !== "string" ||
@@ -37,86 +51,59 @@ function getClientId(
   return clientId.trim();
 }
 
-function requireAdmin(
-  req: Request,
-): void {
+function requireAdmin(req: Request): void {
   if (req.user?.role !== "admin") {
-    throw new Error(
-      "Administrator access is required.",
-    );
+    throw new Error(ADMIN_REQUIRED);
   }
 }
 
-function getReference(
+function getRouteParam(
   req: Request,
+  name: string,
+  label: string,
 ): string {
-  const reference =
-    req.params.reference;
+  const value = req.params[name];
 
   if (
-    typeof reference !== "string" ||
-    !reference.trim()
+    typeof value !== "string" ||
+    !value.trim()
   ) {
-    throw new Error(
-      "Payment reference is required.",
-    );
+    throw new Error(`${label} is required.`);
   }
 
-  return reference.trim();
+  return value.trim();
 }
 
-function getRefundReference(
-  req: Request,
-): string {
-  const reference =
-    req.params.reference;
-
-  if (
-    typeof reference !== "string" ||
-    !reference.trim()
-  ) {
-    throw new Error(
-      "Refund reference is required.",
-    );
-  }
-
-  return reference.trim();
+function getReference(req: Request): string {
+  return getRouteParam(
+    req,
+    "reference",
+    "Payment reference",
+  );
 }
 
-function getRefundId(
-  req: Request,
-): string {
-  const refundId =
-    req.params.refundId;
-
-  if (
-    typeof refundId !== "string" ||
-    !refundId.trim()
-  ) {
-    throw new Error(
-      "Refund ID is required.",
-    );
-  }
-
-  return refundId.trim();
+function getRefundReference(req: Request): string {
+  return getRouteParam(
+    req,
+    "reference",
+    "Refund reference",
+  );
 }
 
-function getPaymentId(
-  req: Request,
-): string {
-  const paymentId =
-    req.params.paymentId;
+function getRefundId(req: Request): string {
+  return getRouteParam(
+    req,
+    "refundId",
+    "Refund ID",
+  );
+}
 
-  if (
-    typeof paymentId !== "string" ||
-    !paymentId.trim()
-  ) {
-    throw new Error(
-      "Payment ID is required.",
-    );
-  }
-
-  return paymentId.trim();
+function getPaymentId(req: Request): string {
+  return getRouteParam(
+    req,
+    "paymentId",
+    "Payment ID",
+  );
 }
 
 function getOptionalPositiveInteger(
@@ -136,11 +123,10 @@ function getOptionalPositiveInteger(
     );
   }
 
-  const parsed =
-    Number(value);
+  const parsed = Number(value);
 
   if (
-    !Number.isInteger(parsed) ||
+    !Number.isSafeInteger(parsed) ||
     parsed < 1
   ) {
     throw new Error(
@@ -168,11 +154,10 @@ function getOptionalNonNegativeInteger(
     );
   }
 
-  const parsed =
-    Number(value);
+  const parsed = Number(value);
 
   if (
-    !Number.isInteger(parsed) ||
+    !Number.isSafeInteger(parsed) ||
     parsed < 0
   ) {
     throw new Error(
@@ -194,46 +179,106 @@ function getOptionalPaymentStatus(
     typeof value !== "string" ||
     !value.trim()
   ) {
-    throw new Error(
-      "Invalid payment status.",
-    );
+    throw new Error("Invalid payment status.");
   }
 
-  const status =
-    value.trim();
-
-  const validStatuses:
-    readonly PaymentStatus[] = [
-      "pending",
-      "processing",
-      "successful",
-      "failed",
-      "cancelled",
-      "expired",
-      "refunded",
-    ];
+  const status = value.trim();
 
   if (
-    !validStatuses.includes(
+    !PAYMENT_STATUSES.includes(
       status as PaymentStatus,
     )
   ) {
-    throw new Error(
-      "Invalid payment status.",
-    );
+    throw new Error("Invalid payment status.");
   }
 
   return status as PaymentStatus;
 }
 
-function getErrorMessage(
-  error: unknown,
-): string {
+function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
 
   return "An unexpected payment error occurred.";
+}
+
+function getErrorStatusCode(
+  error: unknown,
+): number {
+  const message = getErrorMessage(error);
+
+  if (message === ADMIN_REQUIRED) {
+    return 403;
+  }
+
+  if (
+    message ===
+      "Authenticated client identity is required."
+  ) {
+    return 401;
+  }
+
+  if (
+    message === "Payment was not found." ||
+    message === "Refund was not found." ||
+    message === RESOURCE_NOT_FOUND
+  ) {
+    return 404;
+  }
+
+  if (
+    /already (?:paid|exists|exists for|has been)|already have|duplicate|conflict|active reservation|reservation already/i.test(
+      message,
+    )
+  ) {
+    return 409;
+  }
+
+  if (
+    /required|invalid|must be|unsupported|does not match|cannot |only successful|not permitted|not found/i.test(
+      message,
+    )
+  ) {
+    return 400;
+  }
+
+  return 500;
+}
+
+function sendError(
+  res: Response,
+  error: unknown,
+): void {
+  if (error instanceof KoraRateLimitError) {
+    if (error.retryAfterSeconds !== undefined) {
+      res.set(
+        "Retry-After",
+        String(error.retryAfterSeconds),
+      );
+    }
+
+    res.status(429).json({
+      success: false,
+      code: "PAYMENT_PROVIDER_RATE_LIMITED",
+      message: error.message,
+      ...(error.retryAfterSeconds !== undefined && {
+        retryAfterSeconds: error.retryAfterSeconds,
+      }),
+    });
+
+    return;
+  }
+
+  const statusCode = getErrorStatusCode(error);
+
+  res.status(statusCode).json({
+    success: false,
+    message:
+      statusCode === 500
+        ? "An unexpected server error occurred."
+        : getErrorMessage(error),
+  });
 }
 
 function serializePayment(
@@ -259,53 +304,22 @@ function serializePayment(
   },
 ) {
   return {
-    paymentId:
-      payment._id,
-
-    reference:
-      payment.reference,
-
-    providerReference:
-      payment.providerReference,
-
-    productType:
-      payment.productType,
-
-    productId:
-      payment.productId,
-
-    optionId:
-      payment.optionId,
-
-    productName:
-      payment.productName,
-
-    optionName:
-      payment.optionName,
-
-    amount:
-      payment.amount.toString(),
-
-    currency:
-      payment.currency,
-
-    status:
-      payment.status,
-
-    checkoutUrl:
-      payment.checkoutUrl,
-
-    paidAt:
-      payment.paidAt,
-
-    failureReason:
-      payment.failureReason,
-
-    createdAt:
-      payment.createdAt,
-
-    updatedAt:
-      payment.updatedAt,
+    paymentId: payment._id,
+    reference: payment.reference,
+    providerReference: payment.providerReference,
+    productType: payment.productType,
+    productId: payment.productId,
+    optionId: payment.optionId,
+    productName: payment.productName,
+    optionName: payment.optionName,
+    amount: payment.amount.toString(),
+    currency: payment.currency,
+    status: payment.status,
+    checkoutUrl: payment.checkoutUrl,
+    paidAt: payment.paidAt,
+    failureReason: payment.failureReason,
+    createdAt: payment.createdAt,
+    updatedAt: payment.updatedAt,
   };
 }
 
@@ -330,47 +344,20 @@ function serializeRefund(
   },
 ) {
   return {
-    refundId:
-      refund._id,
-
-    paymentId:
-      refund.paymentId,
-
-    clientId:
-      refund.clientId,
-
-    reference:
-      refund.reference,
-
-    providerReference:
-      refund.providerReference,
-
-    amount:
-      refund.amount.toString(),
-
-    currency:
-      refund.currency,
-
-    status:
-      refund.status,
-
-    reason:
-      refund.reason,
-
-    failureReason:
-      refund.failureReason,
-
-    requestedAt:
-      refund.requestedAt,
-
-    completedAt:
-      refund.completedAt,
-
-    createdAt:
-      refund.createdAt,
-
-    updatedAt:
-      refund.updatedAt,
+    refundId: refund._id,
+    paymentId: refund.paymentId,
+    clientId: refund.clientId,
+    reference: refund.reference,
+    providerReference: refund.providerReference,
+    amount: refund.amount.toString(),
+    currency: refund.currency,
+    status: refund.status,
+    reason: refund.reason,
+    failureReason: refund.failureReason,
+    requestedAt: refund.requestedAt,
+    completedAt: refund.completedAt,
+    createdAt: refund.createdAt,
+    updatedAt: refund.updatedAt,
   };
 }
 
@@ -379,62 +366,18 @@ export async function initializePayment(
   res: Response,
 ): Promise<void> {
   try {
-    const clientId =
-      getClientId(req);
-
-    const payment =
-      await paymentService.createPayment(
-        clientId,
-        req.body,
-      );
+    const payment = await paymentService.createPayment(
+      getClientId(req),
+      req.body,
+    );
 
     res.status(201).json({
       success: true,
-      message:
-        "Payment initialized successfully.",
-      data:
-        serializePayment(
-          payment,
-        ),
+      message: "Payment initialized successfully.",
+      data: serializePayment(payment),
     });
   } catch (error) {
-    if (
-      error instanceof
-      KoraRateLimitError
-    ) {
-      if (
-        error.retryAfterSeconds !==
-        undefined
-      ) {
-        res.set(
-          "Retry-After",
-          String(
-            error.retryAfterSeconds,
-          ),
-        );
-      }
-
-      res.status(429).json({
-        success: false,
-        code:
-          "PAYMENT_PROVIDER_RATE_LIMITED",
-        message:
-          error.message,
-        ...(error.retryAfterSeconds !==
-          undefined && {
-          retryAfterSeconds:
-            error.retryAfterSeconds,
-        }),
-      });
-
-      return;
-    }
-
-    res.status(400).json({
-      success: false,
-      message:
-        getErrorMessage(error),
-    });
+    sendError(res, error);
   }
 }
 
@@ -443,11 +386,8 @@ export async function verifyPayment(
   res: Response,
 ): Promise<void> {
   try {
-    const clientId =
-      getClientId(req);
-
-    const reference =
-      getReference(req);
+    const clientId = getClientId(req);
+    const reference = getReference(req);
 
     const payment =
       await paymentService.getPaymentByReference(
@@ -458,8 +398,7 @@ export async function verifyPayment(
     if (!payment) {
       res.status(404).json({
         success: false,
-        message:
-          "Payment was not found.",
+        message: "Payment was not found.",
       });
 
       return;
@@ -467,56 +406,16 @@ export async function verifyPayment(
 
     const verifiedPayment =
       await paymentService.verifyPayment(
-        reference,
+        payment.reference,
       );
 
     res.status(200).json({
       success: true,
-      message:
-        "Payment status retrieved successfully.",
-      data:
-        serializePayment(
-          verifiedPayment,
-        ),
+      message: "Payment status retrieved successfully.",
+      data: serializePayment(verifiedPayment),
     });
   } catch (error) {
-    if (
-      error instanceof
-      KoraRateLimitError
-    ) {
-      if (
-        error.retryAfterSeconds !==
-        undefined
-      ) {
-        res.set(
-          "Retry-After",
-          String(
-            error.retryAfterSeconds,
-          ),
-        );
-      }
-
-      res.status(429).json({
-        success: false,
-        code:
-          "PAYMENT_PROVIDER_RATE_LIMITED",
-        message:
-          error.message,
-        ...(error.retryAfterSeconds !==
-          undefined && {
-          retryAfterSeconds:
-            error.retryAfterSeconds,
-        }),
-      });
-
-      return;
-    }
-
-    res.status(400).json({
-      success: false,
-      message:
-        getErrorMessage(error),
-    });
+    sendError(res, error);
   }
 }
 
@@ -525,23 +424,16 @@ export async function getPayment(
   res: Response,
 ): Promise<void> {
   try {
-    const clientId =
-      getClientId(req);
-
-    const reference =
-      getReference(req);
-
     const payment =
       await paymentService.getPaymentByReference(
-        clientId,
-        reference,
+        getClientId(req),
+        getReference(req),
       );
 
     if (!payment) {
       res.status(404).json({
         success: false,
-        message:
-          "Payment was not found.",
+        message: "Payment was not found.",
       });
 
       return;
@@ -549,17 +441,10 @@ export async function getPayment(
 
     res.status(200).json({
       success: true,
-      data:
-        serializePayment(
-          payment,
-        ),
+      data: serializePayment(payment),
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message:
-        getErrorMessage(error),
-    });
+    sendError(res, error);
   }
 }
 
@@ -568,49 +453,29 @@ export async function getMyPayments(
   res: Response,
 ): Promise<void> {
   try {
-    const clientId =
-      getClientId(req);
-
-    const limit =
-      getOptionalPositiveInteger(
-        req.query.limit,
-        "limit",
-      );
-
-    const skip =
-      getOptionalNonNegativeInteger(
-        req.query.skip,
-        "skip",
-      );
-
-    const status =
-      getOptionalPaymentStatus(
-        req.query.status,
-      );
-
-    const payments =
-      await paymentService.getMyPayments(
-        clientId,
-        {
-          status,
-          limit,
-          skip,
-        },
-      );
+    const payments = await paymentService.getMyPayments(
+      getClientId(req),
+      {
+        status: getOptionalPaymentStatus(
+          req.query.status,
+        ),
+        limit: getOptionalPositiveInteger(
+          req.query.limit,
+          "limit",
+        ),
+        skip: getOptionalNonNegativeInteger(
+          req.query.skip,
+          "skip",
+        ),
+      },
+    );
 
     res.status(200).json({
       success: true,
-      data:
-        payments.map(
-          serializePayment,
-        ),
+      data: payments.map(serializePayment),
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message:
-        getErrorMessage(error),
-    });
+    sendError(res, error);
   }
 }
 
@@ -621,62 +486,31 @@ export async function getAdminPayments(
   try {
     requireAdmin(req);
 
-    const limit =
-      getOptionalPositiveInteger(
+    const result = await paymentService.getAdminPayments({
+      status: getOptionalPaymentStatus(
+        req.query.status,
+      ),
+      limit: getOptionalPositiveInteger(
         req.query.limit,
         "limit",
-      );
-
-    const skip =
-      getOptionalNonNegativeInteger(
+      ),
+      skip: getOptionalNonNegativeInteger(
         req.query.skip,
         "skip",
-      );
-
-    const status =
-      getOptionalPaymentStatus(
-        req.query.status,
-      );
-
-    const result =
-      await paymentService.getAdminPayments({
-        status,
-        limit,
-        skip,
-      });
+      ),
+    });
 
     res.status(200).json({
       success: true,
       data: {
-        payments:
-          result.payments.map(
-            serializePayment,
-          ),
-
-        total:
-          result.total,
-
-        limit:
-          result.limit,
-
-        skip:
-          result.skip,
+        payments: result.payments.map(serializePayment),
+        total: result.total,
+        limit: result.limit,
+        skip: result.skip,
       },
     });
   } catch (error) {
-    const message =
-      getErrorMessage(error);
-
-    const statusCode =
-      message ===
-        "Administrator access is required."
-        ? 403
-        : 400;
-
-    res.status(statusCode).json({
-      success: false,
-      message,
-    });
+    sendError(res, error);
   }
 }
 
@@ -687,24 +521,20 @@ export async function createRefund(
   try {
     requireAdmin(req);
 
-    const paymentId =
-      getPaymentId(req);
+    const paymentId = getPaymentId(req);
 
     const amount =
-      typeof req.body?.amount ===
-      "string"
+      typeof req.body?.amount === "string"
         ? req.body.amount.trim()
         : undefined;
 
     const reason =
-      typeof req.body?.reason ===
-      "string"
+      typeof req.body?.reason === "string"
         ? req.body.reason.trim()
         : undefined;
 
     const webhookUrl =
-      typeof req.body?.webhookUrl ===
-      "string"
+      typeof req.body?.webhookUrl === "string"
         ? req.body.webhookUrl.trim()
         : undefined;
 
@@ -718,40 +548,17 @@ export async function createRefund(
 
     res.status(201).json({
       success: true,
-      message:
-        "Refund initiated successfully.",
+      message: "Refund initiated successfully.",
       data: {
-        payment:
-          serializePayment(
-            result.payment,
-          ),
-
-        refund:
-          serializeRefund(
-            result.refund,
-          ),
-
-        refundedAmount:
-          result.refundedAmount.toString(),
-
+        payment: serializePayment(result.payment),
+        refund: serializeRefund(result.refund),
+        refundedAmount: result.refundedAmount.toString(),
         remainingRefundableAmount:
           result.remainingRefundableAmount.toString(),
       },
     });
   } catch (error) {
-    const message =
-      getErrorMessage(error);
-
-    const statusCode =
-      message ===
-        "Administrator access is required."
-        ? 403
-        : 400;
-
-    res.status(statusCode).json({
-      success: false,
-      message,
-    });
+    sendError(res, error);
   }
 }
 
@@ -760,25 +567,18 @@ export async function getRefund(
   res: Response,
 ): Promise<void> {
   try {
-    const clientId =
-      getClientId(req);
-
-    const reference =
-      getRefundReference(req);
+    const clientId = getClientId(req);
+    const reference = getRefundReference(req);
 
     const refund =
       await paymentRefundService.getRefundByReference(
         reference,
       );
 
-    if (
-      refund.clientId.toString() !==
-      clientId
-    ) {
+    if (refund.clientId.toString() !== clientId) {
       res.status(404).json({
         success: false,
-        message:
-          "Refund was not found.",
+        message: "Refund was not found.",
       });
 
       return;
@@ -786,17 +586,10 @@ export async function getRefund(
 
     res.status(200).json({
       success: true,
-      data:
-        serializeRefund(
-          refund,
-        ),
+      data: serializeRefund(refund),
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message:
-        getErrorMessage(error),
-    });
+    sendError(res, error);
   }
 }
 
@@ -805,43 +598,27 @@ export async function getMyRefunds(
   res: Response,
 ): Promise<void> {
   try {
-    const clientId =
-      getClientId(req);
-
-    const limit =
-      getOptionalPositiveInteger(
-        req.query.limit,
-        "limit",
-      );
-
-    const skip =
-      getOptionalNonNegativeInteger(
-        req.query.skip,
-        "skip",
-      );
-
     const refunds =
       await paymentRefundService.getRefundsForClient(
-        clientId,
+        getClientId(req),
         {
-          limit,
-          skip,
+          limit: getOptionalPositiveInteger(
+            req.query.limit,
+            "limit",
+          ),
+          skip: getOptionalNonNegativeInteger(
+            req.query.skip,
+            "skip",
+          ),
         },
       );
 
     res.status(200).json({
       success: true,
-      data:
-        refunds.map(
-          serializeRefund,
-        ),
+      data: refunds.map(serializeRefund),
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message:
-        getErrorMessage(error),
-    });
+    sendError(res, error);
   }
 }
 
@@ -850,23 +627,16 @@ export async function getPaymentRefunds(
   res: Response,
 ): Promise<void> {
   try {
-    const clientId =
-      getClientId(req);
-
-    const paymentId =
-      getPaymentId(req);
-
     const payment =
       await paymentService.getPaymentByIdForClient(
-        clientId,
-        paymentId,
+        getClientId(req),
+        getPaymentId(req),
       );
 
     if (!payment) {
       res.status(404).json({
         success: false,
-        message:
-          "Payment was not found.",
+        message: "Payment was not found.",
       });
 
       return;
@@ -879,17 +649,10 @@ export async function getPaymentRefunds(
 
     res.status(200).json({
       success: true,
-      data:
-        refunds.map(
-          serializeRefund,
-        ),
+      data: refunds.map(serializeRefund),
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message:
-        getErrorMessage(error),
-    });
+    sendError(res, error);
   }
 }
 
@@ -898,23 +661,16 @@ export async function getPaymentRefundTotals(
   res: Response,
 ): Promise<void> {
   try {
-    const clientId =
-      getClientId(req);
-
-    const paymentId =
-      getPaymentId(req);
-
     const payment =
       await paymentService.getPaymentByIdForClient(
-        clientId,
-        paymentId,
+        getClientId(req),
+        getPaymentId(req),
       );
 
     if (!payment) {
       res.status(404).json({
         success: false,
-        message:
-          "Payment was not found.",
+        message: "Payment was not found.",
       });
 
       return;
@@ -928,22 +684,14 @@ export async function getPaymentRefundTotals(
     res.status(200).json({
       success: true,
       data: {
-        paymentAmount:
-          totals.paymentAmount.toString(),
-
-        refundedAmount:
-          totals.refundedAmount.toString(),
-
+        paymentAmount: totals.paymentAmount.toString(),
+        refundedAmount: totals.refundedAmount.toString(),
         remainingRefundableAmount:
           totals.remainingRefundableAmount.toString(),
       },
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message:
-        getErrorMessage(error),
-    });
+    sendError(res, error);
   }
 }
 
@@ -954,37 +702,18 @@ export async function refreshRefund(
   try {
     requireAdmin(req);
 
-    const refundId =
-      getRefundId(req);
-
     const refund =
       await paymentRefundService.refreshRefund(
-        refundId,
+        getRefundId(req),
       );
 
     res.status(200).json({
       success: true,
-      message:
-        "Refund status refreshed successfully.",
-      data:
-        serializeRefund(
-          refund,
-        ),
+      message: "Refund status refreshed successfully.",
+      data: serializeRefund(refund),
     });
   } catch (error) {
-    const message =
-      getErrorMessage(error);
-
-    const statusCode =
-      message ===
-        "Administrator access is required."
-        ? 403
-        : 400;
-
-    res.status(statusCode).json({
-      success: false,
-      message,
-    });
+    sendError(res, error);
   }
 }
 
@@ -995,34 +724,16 @@ export async function getAdminRefund(
   try {
     requireAdmin(req);
 
-    const reference =
-      getRefundReference(req);
-
     const refund =
       await paymentRefundService.getRefundByReference(
-        reference,
+        getRefundReference(req),
       );
 
     res.status(200).json({
       success: true,
-      data:
-        serializeRefund(
-          refund,
-        ),
+      data: serializeRefund(refund),
     });
   } catch (error) {
-    const message =
-      getErrorMessage(error);
-
-    const statusCode =
-      message ===
-        "Administrator access is required."
-        ? 403
-        : 400;
-
-    res.status(statusCode).json({
-      success: false,
-      message,
-    });
+    sendError(res, error);
   }
 }

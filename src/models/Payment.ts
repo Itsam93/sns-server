@@ -35,6 +35,8 @@ export interface IPayment
 
   checkoutUrl?: string;
 
+  workshopReservationId?: mongoose.Types.ObjectId;
+
   paidAt?: Date;
   failedAt?: Date;
   cancelledAt?: Date;
@@ -180,6 +182,12 @@ const paymentSchema =
         type: String,
         trim: true,
         maxlength: 2000,
+      },
+
+      workshopReservationId: {
+        type: Schema.Types.ObjectId,
+        ref: "WorkshopReservation",
+        index: true,
       },
 
       paidAt: {

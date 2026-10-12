@@ -2,7 +2,6 @@ import mongoose, {
   Document,
   Schema,
 } from "mongoose";
-
 import {
   SUPPORTED_CURRENCIES,
   type Currency,
@@ -19,26 +18,20 @@ export interface IWorkshopRegistration
   clientId?: mongoose.Types.ObjectId;
   workshopId: mongoose.Types.ObjectId;
   paymentId: mongoose.Types.ObjectId;
-
   ticketCode: string;
   ticketName: string;
   attendeeCount: number;
-
   amountPaid: mongoose.Types.Decimal128;
   currency: Currency;
-
   fullName: string;
   email: string;
   phone?: string;
   organisationName?: string;
-
   status: WorkshopRegistrationStatus;
-
   registeredAt: Date;
   attendedAt?: Date;
   cancelledAt?: Date;
   refundedAt?: Date;
-
   createdAt: Date;
   updatedAt: Date;
 }
@@ -237,6 +230,30 @@ workshopRegistrationSchema.index({
   registeredAt: 1,
 });
 
+workshopRegistrationSchema.index(
+  {
+    clientId: 1,
+    workshopId: 1,
+  },
+  {
+    unique: true,
+    name:
+      "unique_active_client_workshop_registration",
+    partialFilterExpression: {
+      clientId: {
+        $exists: true,
+        $ne: null,
+      },
+      status: {
+        $in: [
+          "registered",
+          "attended",
+        ],
+      },
+    },
+  },
+);
+
 workshopRegistrationSchema.pre(
   "validate",
   function () {
@@ -279,6 +296,76 @@ workshopRegistrationSchema.pre(
       registration.invalidate(
         "attendedAt",
         "A registered workshop participant cannot have an attendance date.",
+      );
+    }
+
+    if (
+      registration.status !== "cancelled" &&
+      registration.cancelledAt
+    ) {
+      registration.invalidate(
+        "cancelledAt",
+        "Only a cancelled registration can have a cancellation date.",
+      );
+    }
+
+    if (
+      registration.status !== "refunded" &&
+      registration.refundedAt
+    ) {
+      registration.invalidate(
+        "refundedAt",
+        "Only a refunded registration can have a refund date.",
+      );
+    }
+
+    if (
+      registration.status !== "attended" &&
+      registration.attendedAt
+    ) {
+      registration.invalidate(
+        "attendedAt",
+        "Only an attended registration can have an attendance date.",
+      );
+    }
+
+    if (
+      registration.status === "attended" &&
+      registration.cancelledAt
+    ) {
+      registration.invalidate(
+        "cancelledAt",
+        "An attended registration cannot have a cancellation date.",
+      );
+    }
+
+    if (
+      registration.status === "attended" &&
+      registration.refundedAt
+    ) {
+      registration.invalidate(
+        "refundedAt",
+        "An attended registration cannot have a refund date.",
+      );
+    }
+
+    if (
+      registration.status === "cancelled" &&
+      registration.refundedAt
+    ) {
+      registration.invalidate(
+        "refundedAt",
+        "A cancelled registration cannot have a refund date.",
+      );
+    }
+
+    if (
+      registration.status === "refunded" &&
+      registration.cancelledAt
+    ) {
+      registration.invalidate(
+        "cancelledAt",
+        "A refunded registration cannot have a cancellation date.",
       );
     }
   },

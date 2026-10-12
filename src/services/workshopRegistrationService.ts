@@ -58,12 +58,8 @@ export class WorkshopRegistrationServiceError extends AppError {
     message: string,
     statusCode = 400,
   ) {
-    super(
-      message,
-      statusCode,
-    );
-    this.name =
-      "WorkshopRegistrationServiceError";
+    super(message, statusCode);
+    this.name = "WorkshopRegistrationServiceError";
   }
 }
 
@@ -77,11 +73,10 @@ export class WorkshopRegistrationNotFoundError extends WorkshopRegistrationServi
 }
 
 export class WorkshopRegistrationAlreadyExistsError extends WorkshopRegistrationServiceError {
-  constructor() {
-    super(
-      "A workshop registration already exists for this payment.",
-      409,
-    );
+  constructor(
+    message = "A workshop registration already exists for this client and workshop.",
+  ) {
+    super(message, 409);
   }
 }
 
@@ -89,20 +84,14 @@ function validateObjectId(
   value: string,
   field: string,
 ): mongoose.Types.ObjectId {
-  if (
-    !mongoose.Types.ObjectId.isValid(
-      value,
-    )
-  ) {
+  if (!mongoose.Types.ObjectId.isValid(value)) {
     throw new WorkshopRegistrationServiceError(
       `Invalid ${field}.`,
       400,
     );
   }
 
-  return new mongoose.Types.ObjectId(
-    value,
-  );
+  return new mongoose.Types.ObjectId(value);
 }
 
 function requireNonEmptyString(
@@ -120,13 +109,9 @@ function requireNonEmptyString(
     );
   }
 
-  const normalized =
-    value.trim();
+  const normalized = value.trim();
 
-  if (
-    normalized.length >
-    maxLength
-  ) {
+  if (normalized.length > maxLength) {
     throw new WorkshopRegistrationServiceError(
       `${field} is too long.`,
       400,
@@ -141,33 +126,24 @@ function optionalString(
   field: string,
   maxLength: number,
 ): string | undefined {
-  if (
-    value === undefined ||
-    value === null
-  ) {
+  if (value === undefined || value === null) {
     return undefined;
   }
 
-  if (
-    typeof value !== "string"
-  ) {
+  if (typeof value !== "string") {
     throw new WorkshopRegistrationServiceError(
       `${field} must be a string.`,
       400,
     );
   }
 
-  const normalized =
-    value.trim();
+  const normalized = value.trim();
 
   if (!normalized) {
     return undefined;
   }
 
-  if (
-    normalized.length >
-    maxLength
-  ) {
+  if (normalized.length > maxLength) {
     throw new WorkshopRegistrationServiceError(
       `${field} is too long.`,
       400,
@@ -177,19 +153,10 @@ function optionalString(
   return normalized;
 }
 
-function normalizeEmail(
-  value: string,
-): string {
-  const email =
-    value
-      .trim()
-      .toLowerCase();
+function normalizeEmail(value: string): string {
+  const email = value.trim().toLowerCase();
 
-  if (
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-      email,
-    )
-  ) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new WorkshopRegistrationServiceError(
       "Invalid email address.",
       400,
@@ -199,13 +166,8 @@ function normalizeEmail(
   return email;
 }
 
-function validateAttendeeCount(
-  value: number,
-): void {
-  if (
-    !Number.isInteger(value) ||
-    value < 1
-  ) {
+function validateAttendeeCount(value: number): void {
+  if (!Number.isInteger(value) || value < 1) {
     throw new WorkshopRegistrationServiceError(
       "Attendee count must be a positive whole number.",
       400,
@@ -216,15 +178,9 @@ function validateAttendeeCount(
 function validateAmount(
   value: mongoose.Types.Decimal128,
 ): void {
-  const amount =
-    Number(
-      value.toString(),
-    );
+  const amount = Number(value.toString());
 
-  if (
-    !Number.isFinite(amount) ||
-    amount <= 0
-  ) {
+  if (!Number.isFinite(amount) || amount <= 0) {
     throw new WorkshopRegistrationServiceError(
       "Registration amount must be greater than zero.",
       400,
@@ -236,11 +192,7 @@ function validateDate(
   value: Date,
   field: string,
 ): void {
-  if (
-    Number.isNaN(
-      value.getTime(),
-    )
-  ) {
+  if (Number.isNaN(value.getTime())) {
     throw new WorkshopRegistrationServiceError(
       `Invalid ${field}.`,
       400,
@@ -251,10 +203,7 @@ function validateDate(
 async function getWorkshopOrFail(
   workshopId: mongoose.Types.ObjectId,
 ): Promise<IWorkshop> {
-  const workshop =
-    await Workshop.findById(
-      workshopId,
-    );
+  const workshop = await Workshop.findById(workshopId);
 
   if (!workshop) {
     throw new WorkshopRegistrationServiceError(
@@ -269,16 +218,13 @@ async function getWorkshopOrFail(
 async function getRegistrationByIdOrFail(
   registrationId: string,
 ): Promise<WorkshopRegistrationDocument> {
-  const id =
-    validateObjectId(
-      registrationId,
-      "workshop registration ID",
-    );
+  const id = validateObjectId(
+    registrationId,
+    "workshop registration ID",
+  );
 
   const registration =
-    await WorkshopRegistration.findById(
-      id,
-    );
+    await WorkshopRegistration.findById(id);
 
   if (!registration) {
     throw new WorkshopRegistrationNotFoundError();
@@ -291,19 +237,15 @@ function getTicketOrFail(
   workshop: IWorkshop,
   ticketCode: string,
 ) {
-  const normalizedCode =
-    ticketCode
-      .trim()
-      .toLowerCase();
+  const normalizedCode = ticketCode
+    .trim()
+    .toLowerCase();
 
-  const ticket =
-    workshop.ticketTypes.find(
-      (item) =>
-        item.code
-          .trim()
-          .toLowerCase() ===
-        normalizedCode,
-    );
+  const ticket = workshop.ticketTypes.find(
+    (item) =>
+      item.code.trim().toLowerCase() ===
+      normalizedCode,
+  );
 
   if (!ticket) {
     throw new WorkshopRegistrationServiceError(
@@ -322,80 +264,75 @@ function getTicketOrFail(
   return ticket;
 }
 
+
 export async function createWorkshopRegistration(
   input: CreateWorkshopRegistrationInput,
 ): Promise<WorkshopRegistrationDocument> {
-  const workshopId =
-    validateObjectId(
-      input.workshopId,
-      "workshop ID",
-    );
+  const workshopId = validateObjectId(
+    input.workshopId,
+    "workshop ID",
+  );
 
-  const paymentId =
-    validateObjectId(
-      input.paymentId,
-      "payment ID",
-    );
+  const paymentId = validateObjectId(
+    input.paymentId,
+    "payment ID",
+  );
 
-  const clientId =
-    input.clientId
-      ? validateObjectId(
-          input.clientId,
-          "client ID",
-        )
-      : undefined;
+  const clientId = input.clientId
+    ? validateObjectId(input.clientId, "client ID")
+    : undefined;
 
-  const workshop =
-    await getWorkshopOrFail(
-      workshopId,
-    );
+  const existingByPayment =
+    await WorkshopRegistration.findOne({ paymentId });
 
-  const existing =
-    await WorkshopRegistration.findOne({
-      paymentId,
-    });
+  if (existingByPayment) {
+    const sameWorkshop =
+      existingByPayment.workshopId.equals(workshopId);
 
-  if (existing) {
-    throw new WorkshopRegistrationAlreadyExistsError();
+    const sameClient =
+      existingByPayment.clientId?.toString() ===
+      clientId?.toString();
+
+    if (!sameWorkshop || !sameClient) {
+      throw new WorkshopRegistrationServiceError(
+        "This payment is already associated with a different workshop registration.",
+        409,
+      );
+    }
+
+    return existingByPayment;
   }
 
-  const ticketCode =
-    requireNonEmptyString(
-      input.ticketCode,
-      "Ticket code",
-      100,
-    ).toLowerCase();
+  const workshop = await getWorkshopOrFail(workshopId);
 
-  const ticketName =
-    requireNonEmptyString(
-      input.ticketName,
-      "Ticket name",
-      150,
-    );
+  const ticketCode = requireNonEmptyString(
+    input.ticketCode,
+    "Ticket code",
+    50,
+  ).toLowerCase();
 
-  const selectedTicket =
-    getTicketOrFail(
-      workshop,
-      ticketCode,
-    );
+  const ticketName = requireNonEmptyString(
+    input.ticketName,
+    "Ticket name",
+    150,
+  );
 
-  if (
-    selectedTicket.name !==
-    ticketName
-  ) {
+  const selectedTicket = getTicketOrFail(
+    workshop,
+    ticketCode,
+  );
+
+  if (selectedTicket.name !== ticketName) {
     throw new WorkshopRegistrationServiceError(
       "The workshop ticket name does not match the selected ticket.",
       409,
     );
   }
 
-  validateAttendeeCount(
-    input.attendeeCount,
-  );
+  validateAttendeeCount(input.attendeeCount);
 
   if (
-    input.attendeeCount !==
-    selectedTicket.attendeeCount
+    input.attendeeCount !== selectedTicket.attendeeCount
   ) {
     throw new WorkshopRegistrationServiceError(
       "Attendee count does not match the selected workshop ticket.",
@@ -403,44 +340,46 @@ export async function createWorkshopRegistration(
     );
   }
 
-  validateAmount(
-    input.amountPaid,
+  validateAmount(input.amountPaid);
+
+  const fullName = requireNonEmptyString(
+    input.fullName,
+    "Full name",
+    200,
   );
 
-  const fullName =
-    requireNonEmptyString(
-      input.fullName,
-      "Full name",
-      200,
-    );
+  const email = normalizeEmail(input.email);
 
-  const email =
-    normalizeEmail(
-      input.email,
-    );
-
-  const phone =
-    optionalString(
-      input.phone,
-      "Phone",
-      50,
-    );
-
-  const organisationName =
-    optionalString(
-      input.organisationName,
-      "Organisation name",
-      200,
-    );
-
-  const registeredAt =
-    input.registeredAt ??
-    new Date();
-
-  validateDate(
-    registeredAt,
-    "registration date",
+  const phone = optionalString(
+    input.phone,
+    "Phone",
+    50,
   );
+
+  const organisationName = optionalString(
+    input.organisationName,
+    "Organisation name",
+    200,
+  );
+
+  const registeredAt = input.registeredAt ?? new Date();
+
+  validateDate(registeredAt, "registration date");
+
+  if (clientId) {
+    const existingClientRegistration =
+      await WorkshopRegistration.findOne({
+        clientId,
+        workshopId,
+        status: { $in: ["registered", "attended"] },
+      });
+
+    if (existingClientRegistration) {
+      throw new WorkshopRegistrationAlreadyExistsError(
+        "You are already registered for this workshop.",
+      );
+    }
+  }
 
   try {
     return await WorkshopRegistration.create({
@@ -449,12 +388,9 @@ export async function createWorkshopRegistration(
       paymentId,
       ticketCode,
       ticketName,
-      attendeeCount:
-        input.attendeeCount,
-      amountPaid:
-        input.amountPaid,
-      currency:
-        input.currency,
+      attendeeCount: input.attendeeCount,
+      amountPaid: input.amountPaid,
+      currency: input.currency,
       fullName,
       email,
       phone,
@@ -463,10 +399,7 @@ export async function createWorkshopRegistration(
       registeredAt,
     });
   } catch (error) {
-    if (
-      error instanceof
-      mongoose.Error.ValidationError
-    ) {
+    if (error instanceof mongoose.Error.ValidationError) {
       throw new WorkshopRegistrationServiceError(
         error.message,
         400,
@@ -474,16 +407,39 @@ export async function createWorkshopRegistration(
     }
 
     if (
-      error instanceof
-        mongoose.mongo.MongoServerError &&
+      error instanceof mongoose.mongo.MongoServerError &&
       error.code === 11000
     ) {
-      throw new WorkshopRegistrationAlreadyExistsError();
+      const registration =
+        await WorkshopRegistration.findOne({ paymentId });
+
+      if (registration) {
+        const sameWorkshop =
+          registration.workshopId.equals(workshopId);
+
+        const sameClient =
+          registration.clientId?.toString() ===
+          clientId?.toString();
+
+        if (sameWorkshop && sameClient) {
+          return registration;
+        }
+
+        throw new WorkshopRegistrationServiceError(
+          "This payment is already associated with a different workshop registration.",
+          409,
+        );
+      }
+
+      throw new WorkshopRegistrationAlreadyExistsError(
+        "You are already registered for this workshop.",
+      );
     }
 
     throw error;
   }
 }
+
 
 export async function getWorkshopRegistrationById(
   registrationId: string,
@@ -503,8 +459,7 @@ export async function getWorkshopRegistrationByPaymentId(
     );
 
   return WorkshopRegistration.findOne({
-    paymentId:
-      paymentObjectId,
+    paymentId: paymentObjectId,
   });
 }
 
@@ -525,10 +480,8 @@ export async function getWorkshopRegistrationByClientAndPayment(
     );
 
   return WorkshopRegistration.findOne({
-    clientId:
-      clientObjectId,
-    paymentId:
-      paymentObjectId,
+    clientId: clientObjectId,
+    paymentId: paymentObjectId,
   });
 }
 
@@ -546,13 +499,11 @@ export async function getMyWorkshopRegistrations(
     clientId: mongoose.Types.ObjectId;
     status?: WorkshopRegistrationStatus;
   } = {
-    clientId:
-      clientObjectId,
+    clientId: clientObjectId,
   };
 
   if (status) {
-    filter.status =
-      status;
+    filter.status = status;
   }
 
   return WorkshopRegistration.find(
@@ -580,15 +531,10 @@ export async function getMyWorkshopRegistration(
     );
 
   return WorkshopRegistration.findOne({
-    clientId:
-      clientObjectId,
-    workshopId:
-      workshopObjectId,
+    clientId: clientObjectId,
+    workshopId: workshopObjectId,
     status: {
-      $in: [
-        "registered",
-        "attended",
-      ],
+      $in: ["registered", "attended"],
     },
   }).sort({
     registeredAt: -1,
@@ -622,13 +568,11 @@ export async function getWorkshopRegistrationsForWorkshop(
     workshopId: mongoose.Types.ObjectId;
     status?: WorkshopRegistrationStatus;
   } = {
-    workshopId:
-      workshopObjectId,
+    workshopId: workshopObjectId,
   };
 
   if (status) {
-    filter.status =
-      status;
+    filter.status = status;
   }
 
   return WorkshopRegistration.find(
@@ -652,19 +596,14 @@ export async function getWorkshopRegistrationsByTicket(
     requireNonEmptyString(
       ticketCode,
       "Ticket code",
-      100,
+      50,
     ).toLowerCase();
 
   return WorkshopRegistration.find({
-    workshopId:
-      workshopObjectId,
-    ticketCode:
-      normalizedTicketCode,
+    workshopId: workshopObjectId,
+    ticketCode: normalizedTicketCode,
     status: {
-      $in: [
-        "registered",
-        "attended",
-      ],
+      $in: ["registered", "attended"],
     },
   }).sort({
     registeredAt: -1,
@@ -675,22 +614,15 @@ export async function getAllWorkshopRegistrations(
   query: WorkshopRegistrationListQuery = {},
 ): Promise<WorkshopRegistrationListResult> {
   const page =
-    Number.isInteger(
-      query.page,
-    ) &&
+    Number.isInteger(query.page) &&
     query.page! > 0
       ? query.page!
       : 1;
 
   const pageSize =
-    Number.isInteger(
-      query.pageSize,
-    ) &&
+    Number.isInteger(query.pageSize) &&
     query.pageSize! > 0
-      ? Math.min(
-          query.pageSize!,
-          100,
-        )
+      ? Math.min(query.pageSize!, 100)
       : 20;
 
   const filter: {
@@ -701,24 +633,21 @@ export async function getAllWorkshopRegistrations(
   } = {};
 
   if (query.status) {
-    filter.status =
-      query.status;
+    filter.status = query.status;
   }
 
   if (query.clientId) {
-    filter.clientId =
-      validateObjectId(
-        query.clientId,
-        "client ID",
-      );
+    filter.clientId = validateObjectId(
+      query.clientId,
+      "client ID",
+    );
   }
 
   if (query.workshopId) {
-    filter.workshopId =
-      validateObjectId(
-        query.workshopId,
-        "workshop ID",
-      );
+    filter.workshopId = validateObjectId(
+      query.workshopId,
+      "workshop ID",
+    );
   }
 
   if (query.ticketCode) {
@@ -728,38 +657,31 @@ export async function getAllWorkshopRegistrations(
         .toLowerCase();
   }
 
-  const skip =
-    (page - 1) *
-    pageSize;
+  const skip = (page - 1) * pageSize;
 
-  const [
-    registrations,
-    total,
-  ] = await Promise.all([
-    WorkshopRegistration.find(
-      filter,
-    )
-      .sort({
-        registeredAt: -1,
-        createdAt: -1,
-      })
-      .skip(skip)
-      .limit(pageSize),
+  const [registrations, total] =
+    await Promise.all([
+      WorkshopRegistration.find(filter)
+        .sort({
+          registeredAt: -1,
+          createdAt: -1,
+        })
+        .skip(skip)
+        .limit(pageSize),
 
-    WorkshopRegistration.countDocuments(
-      filter,
-    ),
-  ]);
+      WorkshopRegistration.countDocuments(
+        filter,
+      ),
+    ]);
 
   return {
     registrations,
     page,
     pageSize,
     total,
-    totalPages:
-      Math.ceil(
-        total / pageSize,
-      ),
+    totalPages: Math.ceil(
+      total / pageSize,
+    ),
   };
 }
 
@@ -771,41 +693,28 @@ export async function markWorkshopRegistrationAttended(
       registrationId,
     );
 
-  if (
-    registration.status ===
-    "refunded"
-  ) {
+  if (registration.status === "refunded") {
     throw new WorkshopRegistrationServiceError(
       "A refunded workshop registration cannot be marked as attended.",
       409,
     );
   }
 
-  if (
-    registration.status ===
-    "cancelled"
-  ) {
+  if (registration.status === "cancelled") {
     throw new WorkshopRegistrationServiceError(
       "A cancelled workshop registration cannot be marked as attended.",
       409,
     );
   }
 
-  if (
-    registration.status ===
-    "attended"
-  ) {
+  if (registration.status === "attended") {
     return registration;
   }
 
-  registration.status =
-    "attended";
-
-  registration.attendedAt =
-    new Date();
-
-  registration.cancelledAt =
-    undefined;
+  registration.status = "attended";
+  registration.attendedAt = new Date();
+  registration.cancelledAt = undefined;
+  registration.refundedAt = undefined;
 
   await registration.save();
 
@@ -820,41 +729,27 @@ export async function cancelWorkshopRegistration(
       registrationId,
     );
 
-  if (
-    registration.status ===
-    "attended"
-  ) {
+  if (registration.status === "attended") {
     throw new WorkshopRegistrationServiceError(
       "An attended workshop registration cannot be cancelled.",
       409,
     );
   }
 
-  if (
-    registration.status ===
-    "refunded"
-  ) {
+  if (registration.status === "refunded") {
     throw new WorkshopRegistrationServiceError(
       "A refunded workshop registration cannot be cancelled.",
       409,
     );
   }
 
-  if (
-    registration.status ===
-    "cancelled"
-  ) {
+  if (registration.status === "cancelled") {
     return registration;
   }
 
-  registration.status =
-    "cancelled";
-
-  registration.cancelledAt =
-    new Date();
-
-  registration.attendedAt =
-    undefined;
+  registration.status = "cancelled";
+  registration.cancelledAt = new Date();
+  registration.attendedAt = undefined;
 
   await registration.save();
 
@@ -869,24 +764,14 @@ export async function refundWorkshopRegistration(
       registrationId,
     );
 
-  if (
-    registration.status ===
-    "refunded"
-  ) {
+  if (registration.status === "refunded") {
     return registration;
   }
 
-  registration.status =
-    "refunded";
-
-  registration.refundedAt =
-    new Date();
-
-  registration.attendedAt =
-    undefined;
-
-  registration.cancelledAt =
-    undefined;
+  registration.status = "refunded";
+  registration.refundedAt = new Date();
+  registration.attendedAt = undefined;
+  registration.cancelledAt = undefined;
 
   await registration.save();
 
@@ -903,13 +788,9 @@ export async function countWorkshopRegistrations(
     );
 
   return WorkshopRegistration.countDocuments({
-    workshopId:
-      workshopObjectId,
+    workshopId: workshopObjectId,
     status: {
-      $in: [
-        "registered",
-        "attended",
-      ],
+      $in: ["registered", "attended"],
     },
   });
 }
@@ -929,13 +810,9 @@ export async function countWorkshopAttendees(
     }>([
       {
         $match: {
-          workshopId:
-            workshopObjectId,
+          workshopId: workshopObjectId,
           status: {
-            $in: [
-              "registered",
-              "attended",
-            ],
+            $in: ["registered", "attended"],
           },
         },
       },
@@ -943,8 +820,7 @@ export async function countWorkshopAttendees(
         $group: {
           _id: null,
           total: {
-            $sum:
-              "$attendeeCount",
+            $sum: "$attendeeCount",
           },
         },
       },

@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 import {
   Resource,
+  type BookFormat,
   type ResourceStatus,
   type ResourceType,
 } from "../models/Resource.js";
@@ -16,6 +17,8 @@ type CreateResourceInput = {
   category?: string;
   featuredImage?: string;
   resourceUrl?: string;
+  author?: string;
+  bookFormat?: BookFormat;
   status?: ResourceStatus;
   featured?: boolean;
 };
@@ -29,6 +32,8 @@ type UpdateResourceInput = {
   category?: string;
   featuredImage?: string;
   resourceUrl?: string;
+  author?: string;
+  bookFormat?: BookFormat;
   featured?: boolean;
 };
 
@@ -42,6 +47,7 @@ const RESOURCE_TYPES: ResourceType[] = [
   "article",
   "video",
   "download",
+  "book",
 ];
 
 const STATUS_TRANSITIONS: Record<
@@ -103,10 +109,10 @@ function validateResourceType(
   type: ResourceType,
   content?: string,
   resourceUrl?: string,
+  author?: string,
+  bookFormat?: BookFormat,
 ) {
-  if (
-    !RESOURCE_TYPES.includes(type)
-  ) {
+  if (!RESOURCE_TYPES.includes(type)) {
     throw new AppError(
       "Invalid resource type.",
       400,
@@ -124,12 +130,15 @@ function validateResourceType(
   }
 
   if (
-    (type === "video" ||
-      type === "download") &&
+    (
+      type === "video" ||
+      type === "download" ||
+      type === "book"
+    ) &&
     !resourceUrl?.trim()
   ) {
     throw new AppError(
-      "Resource URL is required for videos and downloads.",
+      "Resource URL is required for videos, downloads, and books.",
       400,
     );
   }
@@ -140,6 +149,49 @@ function validateResourceType(
   ) {
     throw new AppError(
       "Content is only supported for article resources.",
+      400,
+    );
+  }
+
+  if (
+    type === "book" &&
+    !author?.trim()
+  ) {
+    throw new AppError(
+      "Book author is required.",
+      400,
+    );
+  }
+
+  if (
+    type === "book" &&
+    !bookFormat
+  ) {
+    throw new AppError(
+      "Book format is required.",
+      400,
+    );
+  }
+
+  if (
+    type !== "book" &&
+    (author || bookFormat)
+  ) {
+    throw new AppError(
+      "Author and book format are only supported for book resources.",
+      400,
+    );
+  }
+
+  if (
+    type === "book" &&
+    resourceUrl &&
+    !/^https:\/\/(www\.)?amazon\.[a-z.]+\/.+/i.test(
+      resourceUrl,
+    )
+  ) {
+    throw new AppError(
+      "Books must use a valid Amazon product URL.",
       400,
     );
   }
@@ -182,6 +234,8 @@ export async function createResource(
     data.type,
     data.content,
     data.resourceUrl,
+    data.author,
+    data.bookFormat,
   );
 
   await ensureUniqueSlug(
@@ -365,17 +419,43 @@ export async function updateResource(
     resource.type;
 
   const content =
-    data.content ??
-    resource.content;
+    data.content !== undefined
+      ? data.content
+      : resource.content;
 
   const resourceUrl =
-    data.resourceUrl ??
-    resource.resourceUrl;
+    data.resourceUrl !== undefined
+      ? data.resourceUrl
+      : resource.resourceUrl;
+
+  const author =
+    data.author !== undefined
+      ? data.author
+      : resource.author;
+
+  const bookFormat =
+    data.bookFormat !== undefined
+      ? data.bookFormat
+      : resource.bookFormat;
+
+  const typeChanged =
+    data.type !== undefined &&
+    data.type !== resource.type;
 
   validateResourceType(
     type,
-    content,
-    resourceUrl,
+    typeChanged && type !== "article"
+      ? undefined
+      : content,
+    typeChanged && type === "article"
+      ? undefined
+      : resourceUrl,
+    typeChanged && type !== "book"
+      ? undefined
+      : author,
+    typeChanged && type !== "book"
+      ? undefined
+      : bookFormat,
   );
 
   if (
@@ -390,8 +470,7 @@ export async function updateResource(
 
   if (
     data.featured === true &&
-    resource.status !==
-      "published"
+    resource.status !== "published"
   ) {
     throw new AppError(
       "Only published resources can be featured.",
@@ -399,24 +478,11 @@ export async function updateResource(
     );
   }
 
-  if (
-    data.type &&
-    data.type !== resource.type
-  ) {
-    if (
-      data.type === "article"
-    ) {
-      resource.resourceUrl =
-        undefined;
-    }
-
-    if (
-      data.type === "video" ||
-      data.type === "download"
-    ) {
-      resource.content =
-        undefined;
-    }
+  if (typeChanged) {
+    resource.content = undefined;
+    resource.author = undefined;
+    resource.bookFormat = undefined;
+    resource.resourceUrl = undefined;
   }
 
   Object.assign(
@@ -425,11 +491,9 @@ export async function updateResource(
   );
 
   if (
-    resource.status !==
-    "published"
+    resource.status !== "published"
   ) {
-    resource.featured =
-      false;
+    resource.featured = false;
   }
 
   await resource.save();
@@ -461,8 +525,7 @@ export async function updateResourceStatus(
     resource.status;
 
   if (
-    currentStatus !==
-    status
+    currentStatus !== status
   ) {
     const allowedTransitions =
       STATUS_TRANSITIONS[
@@ -481,31 +544,25 @@ export async function updateResourceStatus(
     }
   }
 
-  if (
-    status === "published"
-  ) {
+  if (status === "published") {
     validateResourceType(
       resource.type,
       resource.content,
       resource.resourceUrl,
+      resource.author,
+      resource.bookFormat,
     );
 
-    if (
-      !resource.publishedAt
-    ) {
+    if (!resource.publishedAt) {
       resource.publishedAt =
         new Date();
     }
   }
 
-  resource.status =
-    status;
+  resource.status = status;
 
-  if (
-    status !== "published"
-  ) {
-    resource.featured =
-      false;
+  if (status !== "published") {
+    resource.featured = false;
   }
 
   await resource.save();
@@ -524,8 +581,7 @@ export async function updateResourceFeatured(
 
   if (
     featured &&
-    resource.status !==
-      "published"
+    resource.status !== "published"
   ) {
     throw new AppError(
       "Only published resources can be featured.",
@@ -533,8 +589,7 @@ export async function updateResourceFeatured(
     );
   }
 
-  resource.featured =
-    featured;
+  resource.featured = featured;
 
   await resource.save();
 
@@ -549,10 +604,7 @@ export async function deleteResource(
       resourceId,
     );
 
-  if (
-    resource.status ===
-    "published"
-  ) {
+  if (resource.status === "published") {
     throw new AppError(
       "Published resources cannot be deleted. Archive the resource instead.",
       409,

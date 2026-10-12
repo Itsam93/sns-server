@@ -17,6 +17,11 @@ import {
   updateResourceStatus,
 } from "../services/resourceService.js";
 
+import type {
+  ResourceStatus,
+  ResourceType,
+} from "../models/Resource.js";
+
 function getResourceId(
   req: Request,
 ) {
@@ -155,10 +160,7 @@ export async function getByType(
 
   const resources =
     await getResourcesByType(
-      type as
-        | "article"
-        | "video"
-        | "download",
+      type as ResourceType,
     );
 
   res.status(200).json({
@@ -259,10 +261,7 @@ export async function getByStatus(
 
   const resources =
     await getResourcesByStatus(
-      status as
-        | "draft"
-        | "published"
-        | "archived",
+      status as ResourceStatus,
     );
 
   res.status(200).json({
