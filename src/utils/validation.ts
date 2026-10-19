@@ -61,6 +61,9 @@ export const registerSchema = z
     firstName: nameSchema,
     lastName: nameSchema,
     phone: phoneSchema,
+    acceptTerms: z.literal(true, {
+      error: "You must accept the terms and conditions.",
+    }),
   })
   .strict();
 
